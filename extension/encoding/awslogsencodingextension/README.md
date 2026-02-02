@@ -171,6 +171,23 @@ otelcol --config=config.yaml --feature-gates --feature-gates=<FEATURE_GATE_ID>
 | `userIdentity.arn`              | `aws.principal.arn`            | `aws.user_identity.principal.arn`             |
 | `userIdentity.type`             | `aws.principal.type`           | `aws.user_identity.principal.type`            |
 
+## Streaming Support
+
+All sub formats support both streaming & non-streaming unmarshaling.
+The table below summarizes streaming support details for each log type, along with the offset tracking mechanism,
+
+| Log Type            | Sub Log Type/Source            | Offset Tracking                   |
+|---------------------|--------------------------------|-----------------------------------|
+| CloudTrail          | Generic records                | Number of records processed       |
+| CloudTrail          | Digest record                  | Always 0 (full payload processed) |
+| ELB Access Logs     | ALB/NLB/CLB                    | Bytes processed                   |
+| Network Firewall    | Alert/Flow/TLS                 | Bytes processed                   |
+| S3 Access Logs      | -                              | Bytes processed                   |
+| Subscription filter | -                              | Always 0 (full payload processed) |
+| VPC Flow Logs       | S3 plain text                  | Bytes processed                   |
+| VPC Flow Logs       | CloudWatch subscription filter | Always 0 (full payload processed) |
+| WAF Logs            | -                              | Bytes processed                   |
+
 ## Produced Records per Format
 
 ### VPC flow log record fields

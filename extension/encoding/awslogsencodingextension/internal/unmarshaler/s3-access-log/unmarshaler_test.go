@@ -5,6 +5,8 @@ package s3accesslog
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,6 +16,7 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/pdata/plog"
 
+	"github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/golden"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/pdatatest/plogtest"
 )
@@ -222,6 +225,68 @@ func TestUnmarshalLogs(t *testing.T) {
 			expected, err := golden.ReadLogs(filepath.Join(dir, test.expectedFilename))
 			require.NoError(t, err)
 			require.NoError(t, plogtest.CompareLogs(expected, logs))
+		})
+	}
+}
+
+func TestNewLogsDecoder(t *testing.T) {
+	directory := "testdata/stream"
+	expectPattern := "valid_s3_access_multi_%d.yaml"
+
+	tests := []struct {
+		name   string
+		offset int64
+		index  int
+	}{
+		{
+			name:   "Normal streaming",
+			offset: 0,
+			index:  0,
+		},
+		{
+			name:   "Stream with offset",
+			offset: 554, // skip first record
+			index:  1,   // start from first index
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s3Unmarshaler := s3AccessLogUnmarshaler{buildInfo: component.BuildInfo{}}
+
+			data, err := os.ReadFile(filepath.Join(directory, "valid_log_multi.log"))
+			require.NoError(t, err)
+
+			// Flush after every log for testing purposes & set offset
+			streamer, err := s3Unmarshaler.NewLogsDecoder(bytes.NewReader(data), encoding.WithFlushItems(1), encoding.WithOffset(tt.offset))
+			require.NoError(t, err)
+
+			index := tt.index
+			for {
+				index++
+
+				var logs plog.Logs
+				logs, err = streamer.DecodeLogs()
+				if err != nil {
+					if errors.Is(err, io.EOF) {
+						break
+					}
+
+					t.Errorf("failed to unmarshal log %d: %v", index, err)
+				}
+
+				// To check or update offset, uncomment offset below
+				// fmt.Println(streamer.Offset())
+
+				var expectedLogs plog.Logs
+				expectedLogs, err = golden.ReadLogs(filepath.Join(directory, fmt.Sprintf(expectPattern, index)))
+				require.NoError(t, err)
+				require.NoError(t, plogtest.CompareLogs(expectedLogs, logs, plogtest.IgnoreResourceLogsOrder()))
+			}
+
+			// expect EOF after all logs are read
+			_, err = streamer.DecodeLogs()
+			require.ErrorIs(t, err, io.EOF)
 		})
 	}
 }

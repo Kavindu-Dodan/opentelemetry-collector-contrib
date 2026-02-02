@@ -20,9 +20,11 @@ import (
 	conventions "go.opentelemetry.io/otel/semconv/v1.38.0"
 	"go.uber.org/zap"
 
+	"github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding/awslogsencodingextension/internal/constants"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding/awslogsencodingextension/internal/metadata"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding/awslogsencodingextension/internal/unmarshaler"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/xstreamencoding"
 )
 
 var (
@@ -92,7 +94,23 @@ func NewVPCFlowLogUnmarshaler(
 func (v *vpcFlowLogUnmarshaler) UnmarshalAWSLogs(reader io.Reader) (plog.Logs, error) {
 	switch v.cfg.FileFormat {
 	case constants.FileFormatPlainText:
-		return v.unmarshalPlainTextLogs(reader)
+		// Decode as a stream but flush all at once using flush options
+		streamUnmarshaler, err := v.NewLogsDecoder(reader, encoding.WithFlushItems(0), encoding.WithFlushBytes(0))
+		if err != nil {
+			return plog.Logs{}, err
+		}
+		logs, err := streamUnmarshaler.DecodeLogs()
+		if err != nil {
+			//nolint:errorlint
+			if err == io.EOF {
+				// EOF indicates no logs were found, return any logs that's available
+				return logs, nil
+			}
+
+			return plog.Logs{}, err
+		}
+
+		return logs, nil
 	case constants.FileFormatParquet:
 		// TODO
 		return plog.Logs{}, errors.New("still needs to be implemented")
@@ -102,60 +120,115 @@ func (v *vpcFlowLogUnmarshaler) UnmarshalAWSLogs(reader io.Reader) (plog.Logs, e
 	}
 }
 
-func (v *vpcFlowLogUnmarshaler) unmarshalPlainTextLogs(reader io.Reader) (plog.Logs, error) {
+// NewLogsDecoder returns a LogsDecoder that processes VPC flow logs from the provided reader.
+// Auto-detects the source format (S3 plain text or CloudWatch subscription filter) from the first byte.
+// Supported sub formats:
+//   - S3 plain text logs: Supports offset-based streaming; offset tracks bytes processed
+//   - CloudWatch subscription filter: Processes full payload; offset is always 0
+//   - Parquet format: Not yet implemented
+func (v *vpcFlowLogUnmarshaler) NewLogsDecoder(reader io.Reader, options ...encoding.DecoderOption) (encoding.LogsDecoder, error) {
+	if v.cfg.FileFormat == constants.FileFormatParquet {
+		return nil, errors.New("streaming parquet VPC flow logs is not yet implemented")
+	}
+
 	// use buffered reader for efficiency and to avoid any size restrictions
 	bufReader := bufio.NewReader(reader)
 
-	b, err := bufReader.ReadByte()
-	if err != nil {
-		return plog.Logs{}, fmt.Errorf("failed to read first byte: %w", err)
-	}
-
-	err = bufReader.UnreadByte()
-	if err != nil {
-		return plog.Logs{}, fmt.Errorf("failed to unread first byte: %w", err)
-	}
-
-	if b == '{' {
-		// Dealing with a JSON logs, so check for CW bound trigger
-		return v.fromCloudWatch(v.cfg.parsedFormat, bufReader)
-	}
-
-	// This is S3 bound data, so use fromS3
-	return v.fromS3(bufReader)
-}
-
-// fromS3 expects VPC logs from S3 in plain text format
-func (v *vpcFlowLogUnmarshaler) fromS3(reader *bufio.Reader) (plog.Logs, error) {
 	var err error
-	line, err := reader.ReadString('\n')
+	firstByte, err := bufReader.Peek(1)
 	if err != nil {
-		return plog.Logs{}, fmt.Errorf("failed to read first line of VPC logs from S3: %w", err)
+		return nil, fmt.Errorf("failed to read first byte: %w", err)
 	}
+
+	if firstByte[0] == '{' {
+		// Dealing with a JSON log message, so check for CloudWatch bound trigger
+		var cwLogs plog.Logs
+		cwLogs, err = v.fromCloudWatch(v.cfg.parsedFormat, bufReader)
+		if err != nil {
+			return nil, err
+		}
+
+		var isEOF bool
+		return xstreamencoding.NewLogsDecoderAdapter(
+			func() (plog.Logs, error) {
+				if isEOF {
+					return plog.Logs{}, io.EOF
+				}
+
+				isEOF = true
+				return cwLogs, nil
+			},
+			func() int64 {
+				return 0
+			},
+		), nil
+	}
+
+	var offset int64
+	line, err := bufReader.ReadString('\n')
+	if err != nil {
+		return nil, fmt.Errorf("failed to read first line of VPC logs from S3: %w", err)
+	}
+
+	offset += int64(len(line))
 
 	fields := strings.Fields(line)
-	logs, resourceLogs, scopeLogs := v.createLogs()
-	for {
-		line, err = reader.ReadString('\n')
+	batchHelper := xstreamencoding.NewBatchHelper(options...)
+
+	if batchHelper.Options().Offset > 0 {
+		// discard ignoring the first line
+		var discarded int
+		discarded, err = bufReader.Discard(int(batchHelper.Options().Offset - offset))
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				// Reached the end of the file, add the last line and exit
-				// EOF is ignored as we have already processed all log lines
-				if addLogErr := v.addToLogs(resourceLogs, scopeLogs, fields, strings.TrimSpace(line)); addLogErr != nil {
-					return plog.Logs{}, addLogErr
-				}
-				break
+				return nil, fmt.Errorf("EOF reached before offset %d records were discarded", batchHelper.Options().Offset)
 			}
-
-			return plog.Logs{}, fmt.Errorf("error reading VPC logs: %w", err)
+			return nil, err
 		}
-
-		if err := v.addToLogs(resourceLogs, scopeLogs, fields, strings.TrimSpace(line)); err != nil {
-			return plog.Logs{}, err
-		}
+		offset += int64(discarded)
 	}
 
-	return logs, nil
+	offsetF := func() int64 {
+		return offset
+	}
+
+	decodeF := func() (plog.Logs, error) {
+		logs, resourceLogs, scopeLogs := v.createLogs()
+		for {
+			line, err = bufReader.ReadString('\n')
+			if err != nil {
+				if !errors.Is(err, io.EOF) {
+					return plog.Logs{}, fmt.Errorf("error reading VPC logs: %w", err)
+				}
+
+				if line == "" {
+					break
+				}
+			}
+			batchHelper.IncrementBytes(int64(len(line)))
+			batchHelper.IncrementItems(1)
+			offset += int64(len(line))
+
+			// Trim spaces and new lines
+			line = strings.TrimSpace(line)
+			if err := v.addToLogs(resourceLogs, scopeLogs, fields, line); err != nil {
+				return plog.Logs{}, err
+			}
+
+			if batchHelper.ShouldFlush() {
+				batchHelper.Reset()
+				break
+			}
+		}
+
+		if scopeLogs.LogRecords().Len() == 0 {
+			return logs, io.EOF
+		}
+
+		return logs, nil
+	}
+
+	return xstreamencoding.NewLogsDecoderAdapter(decodeF, offsetF), nil
 }
 
 // fromCloudWatch expects VPC logs from CloudWatch Logs subscription filter trigger

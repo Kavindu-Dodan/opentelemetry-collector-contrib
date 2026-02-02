@@ -6,6 +6,7 @@ package awscloudwatchmetricstreamsencodingextension // import "github.com/open-t
 import (
 	"context"
 	"fmt"
+	"io"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/extension"
@@ -14,26 +15,29 @@ import (
 	"github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding"
 )
 
-var _ encoding.MetricsUnmarshalerExtension = (*encodingExtension)(nil)
+var (
+	_ encoding.MetricsUnmarshalerExtension = (*encodingExtension)(nil)
+	_ encoding.MetricsDecoderExtension     = (*encodingExtension)(nil)
+)
 
 type encodingExtension struct {
-	unmarshaler pmetric.Unmarshaler
-	format      string
+	metricsUnmarshaler metricsUnmarshal
+	format             string
 }
 
 func newExtension(cfg *Config, settings extension.Settings) (*encodingExtension, error) {
 	switch cfg.Format {
 	case formatJSON:
 		return &encodingExtension{
-			unmarshaler: &formatJSONUnmarshaler{
+			metricsUnmarshaler: &formatJSONUnmarshaler{
 				buildInfo: settings.BuildInfo,
 			},
 			format: formatJSON,
 		}, nil
 	case formatOpenTelemetry10:
 		return &encodingExtension{
-			unmarshaler: &formatOpenTelemetry10Unmarshaler{},
-			format:      formatOpenTelemetry10,
+			metricsUnmarshaler: &formatOpenTelemetry10Unmarshaler{},
+			format:             formatOpenTelemetry10,
 		}, nil
 	default:
 		// Format will have been validated by Config.Validate,
@@ -52,9 +56,20 @@ func (*encodingExtension) Shutdown(_ context.Context) error {
 }
 
 func (e *encodingExtension) UnmarshalMetrics(record []byte) (pmetric.Metrics, error) {
-	metrics, err := e.unmarshaler.UnmarshalMetrics(record)
+	metrics, err := e.metricsUnmarshaler.UnmarshalMetrics(record)
 	if err != nil {
 		return pmetric.Metrics{}, fmt.Errorf("failed to unmarshal metrics as '%s' format: %w", e.format, err)
 	}
 	return metrics, nil
+}
+
+// NewMetricsDecoder fulfills the streaming contract, however, does not implement true streaming.
+func (e *encodingExtension) NewMetricsDecoder(reader io.Reader, options ...encoding.DecoderOption) (encoding.MetricsDecoder, error) {
+	return e.metricsUnmarshaler.NewMetricsDecoder(reader, options...)
+}
+
+// metricsUnmarshal is an interface that's expected to be implemented by metrics format implementations.
+type metricsUnmarshal interface {
+	UnmarshalMetrics(record []byte) (pmetric.Metrics, error)
+	NewMetricsDecoder(reader io.Reader, options ...encoding.DecoderOption) (encoding.MetricsDecoder, error)
 }
