@@ -124,3 +124,40 @@ func TestStreamBatchHelper_ShouldFlush(t *testing.T) {
 	helper.IncrementItems(5)
 	assert.True(t, helper.ShouldFlush())
 }
+
+func TestStreamScannerHelper_StreamOffset(t *testing.T) {
+	t.Run("skips specified bytes from start", func(t *testing.T) {
+		input := "line1\nline2\nline3\n"
+		// Skip first 6 bytes ("line1\n"), should start at "line2"
+		helper := NewScannerHelper(strings.NewReader(input), encoding.WithOffset(6))
+
+		line, _, err := helper.ScanString()
+		require.NoError(t, err)
+		assert.Equal(t, "line2", line)
+
+		line, _, err = helper.ScanString()
+		require.NoError(t, err)
+		assert.Equal(t, "line3", line)
+
+		_, _, err = helper.ScanString()
+		assert.ErrorIs(t, err, io.EOF)
+	})
+
+	t.Run("zero offset reads from start", func(t *testing.T) {
+		input := "line1\nline2\n"
+		helper := NewScannerHelper(strings.NewReader(input), encoding.WithOffset(0))
+
+		line, _, err := helper.ScanString()
+		require.NoError(t, err)
+		assert.Equal(t, "line1", line)
+	})
+
+
+	t.Run("offset beyond stream length returns EOF", func(t *testing.T) {
+		input := "short"
+		helper := NewScannerHelper(strings.NewReader(input), encoding.WithOffset(100))
+
+		_, _, err := helper.ScanString()
+		assert.ErrorIs(t, err, io.EOF)
+	})
+}

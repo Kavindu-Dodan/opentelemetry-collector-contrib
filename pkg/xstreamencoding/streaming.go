@@ -17,8 +17,11 @@ import (
 // ScannerHelper is a helper to scan new line delimited records from io.Reader and determine when to flush.
 // Not safe for concurrent use.
 type ScannerHelper struct {
+	options     encoding.DecoderOptions
 	batchHelper *BatchHelper
 	bufReader   *bufio.Reader
+
+	init bool
 }
 
 // NewScannerHelper creates a new ScannerHelper that reads from the provided io.Reader.
@@ -27,6 +30,10 @@ type ScannerHelper struct {
 // Otherwise, a new bufio.Reader will be derived with default buffer size.
 func NewScannerHelper(reader io.Reader, opts ...encoding.DecoderOption) *ScannerHelper {
 	batchHelper := NewBatchHelper(opts...)
+	options := encoding.DecoderOptions{}
+	for _, o := range opts {
+		o(&options)
+	}
 
 	var bufReader *bufio.Reader
 	if br, ok := reader.(*bufio.Reader); ok {
@@ -38,6 +45,7 @@ func NewScannerHelper(reader io.Reader, opts ...encoding.DecoderOption) *Scanner
 	return &ScannerHelper{
 		batchHelper: batchHelper,
 		bufReader:   bufReader,
+		options:     options,
 	}
 }
 
@@ -63,6 +71,17 @@ func (h *ScannerHelper) ScanBytes() (bytes []byte, flush bool, err error) {
 }
 
 func (h *ScannerHelper) scanInternal() ([]byte, bool, error) {
+	if !h.init {
+		if h.options.StreamOffset > 0 {
+			_, err := h.bufReader.Discard(int(h.options.StreamOffset))
+			if err != nil {
+				return nil, false, err
+			}
+		}
+
+		h.init = true
+	}
+
 	var isEOF bool
 	b, err := h.bufReader.ReadBytes('\n')
 	if err != nil {
