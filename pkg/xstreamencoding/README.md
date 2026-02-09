@@ -17,7 +17,9 @@ This package provides the building blocks to implement such stream processing lo
 
 A helper that wraps `io.Reader` to scan newline-delimited records.
 User may forward a `bufio.Reader` with predefined buffers to optimize stream reading.
-It tracks batch metrics and signals when to flush based on configured thresholds using `encoding.UnmarshalOption` functional options.
+It tracks batch metrics and signals when to flush based on configured thresholds using `encoding.DecoderOption` functional options.
+It also tracks the current byte offset read from the stream via `Offset()` method.
+Use `Options()` to access the configured decoder options.
 
 **Note:** Not safe for concurrent use.
 
@@ -25,13 +27,16 @@ It tracks batch metrics and signals when to flush based on configured thresholds
 
 A standalone helper for tracking batch metrics (bytes and items) and determining flush conditions.
 Useful when you need custom scanning logic but still want batch tracking.
+Use `Options()` to access the configured decoder options.
 
 **Note:** Not safe for concurrent use.
 
-### Unmarshaler Adapters
+### Decoder Adapters
 
-- `LogsDecoderFunc` - Adapts a function to the `encoding.LogsDecoder` interface
-- `MetricsDecoderFunc` - Adapts a function to the `encoding.MetricsDecoder` interface
+- `LogsDecoderAdapter` - A struct that implements `encoding.LogsDecoder` interface by wrapping decode and offset functions
+- `MetricsDecoderAdapter` - A struct that implements `encoding.MetricsDecoder` interface by wrapping decode and offset functions
+
+Use `NewLogsDecoderAdapter` and `NewMetricsDecoderAdapter` to create instances.
 
 ## Usage
 
@@ -39,9 +44,13 @@ Useful when you need custom scanning logic but still want batch tracking.
 
 ```go
 // Flush after every 100 items
-helper := xstreamencoding.NewScannerHelper(reader,
+helper, err := xstreamencoding.NewScannerHelper(reader,
     encoding.WithFlushItems(100),
 )
+
+if err != nil {
+    return nil, err
+}
 
 for {
     line, flush, err := helper.ScanString()
@@ -65,7 +74,7 @@ for {
 
 ```go
 // Flush after accumulating ~1MB of data
-helper := xstreamencoding.NewScannerHelper(reader,
+helper, err := xstreamencoding.NewScannerHelper(reader,
     encoding.WithFlushBytes(1024 * 1024),
 )
 ```
@@ -74,7 +83,7 @@ helper := xstreamencoding.NewScannerHelper(reader,
 
 ```go
 // Flush after 1000 items OR 1MB, whichever comes first
-helper := xstreamencoding.NewScannerHelper(reader,
+helper, err := xstreamencoding.NewScannerHelper(reader,
     encoding.WithFlushItems(1000),
     encoding.WithFlushBytes(1024 * 1024),
 )
@@ -105,3 +114,50 @@ for scanner.Scan() {
     }
 }
 ```
+
+### Using Decoder Adapters
+
+To implement `encoding.LogsDecoder` or `encoding.MetricsDecoder`, you may use the decoder adapter structs:
+
+```go
+func (c *myCodec) NewLogsDecoder(reader io.Reader, options ...encoding.DecoderOption) (encoding.LogsDecoder, error) {
+    scanner, err := xstreamencoding.NewScannerHelper(reader, options...)
+    if err != nil {
+        return nil, err
+    }
+	
+    logs := plog.NewLogs()
+
+    decodeFunc := func() (plog.Logs, error) {
+        for {
+            line, flush, err := scanner.ScanBytes()
+
+            if len(line) > 0 {
+                // Parse line and add to logs
+                lr := logs.ResourceLogs().AppendEmpty().ScopeLogs().AppendEmpty().LogRecords().AppendEmpty()
+                lr.Body().SetStr(string(line))
+            }
+
+            if flush || err == io.EOF {
+                result := logs
+                logs = plog.NewLogs() // reset for next batch
+                if err == io.EOF {
+                    return result, io.EOF
+                }
+                return result, nil
+            }
+
+            if err != nil {
+                return plog.Logs{}, err
+            }
+        }
+    }
+
+    offsetFunc := func() int64 {
+        return scanner.Offset()
+    }
+
+    return xstreamencoding.NewLogsDecoderAdapter(decodeFunc, offsetFunc), nil
+}
+```
+

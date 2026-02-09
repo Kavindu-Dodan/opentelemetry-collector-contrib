@@ -19,7 +19,8 @@ func TestStreamScannerHelper_constructor(t *testing.T) {
 	t.Run("IO reader get converted to bufio.Reader", func(t *testing.T) {
 		reader := strings.NewReader("test")
 
-		helper := NewScannerHelper(reader)
+		helper, err := NewScannerHelper(reader)
+		require.NoError(t, err)
 
 		assert.IsType(t, &bufio.Reader{}, helper.bufReader)
 	})
@@ -28,30 +29,43 @@ func TestStreamScannerHelper_constructor(t *testing.T) {
 		reader := strings.NewReader("test")
 		bufReader := bufio.NewReader(reader)
 
-		helper := NewScannerHelper(bufReader)
+		helper, err := NewScannerHelper(bufReader)
+		require.NoError(t, err)
 
 		assert.Equal(t, bufReader, helper.bufReader)
+	})
+
+	t.Run("Offset is checked and error wil be returned if incorrect", func(t *testing.T) {
+		reader := strings.NewReader("test")
+		bufReader := bufio.NewReader(reader)
+
+		_, err := NewScannerHelper(bufReader, encoding.WithOffset(10))
+		require.ErrorContains(t, err, "failed to discard offset 10")
 	})
 }
 
 func TestStreamScannerHelper_ScanString(t *testing.T) {
 	input := "line1\nline2\nline3\n"
-	helper := NewScannerHelper(strings.NewReader(input))
+	helper, err := NewScannerHelper(strings.NewReader(input))
+	require.NoError(t, err)
 
 	line, flush, err := helper.ScanString()
 	require.NoError(t, err)
 	assert.Equal(t, "line1", line)
 	assert.False(t, flush)
+	require.Equal(t, int64(6), helper.Offset())
 
 	line, flush, err = helper.ScanString()
 	require.NoError(t, err)
 	assert.Equal(t, "line2", line)
 	assert.False(t, flush)
+	require.Equal(t, int64(12), helper.Offset())
 
 	line, flush, err = helper.ScanString()
 	require.NoError(t, err)
 	assert.Equal(t, "line3", line)
 	assert.False(t, flush)
+	require.Equal(t, int64(18), helper.Offset())
 
 	_, flush, err = helper.ScanString()
 	assert.ErrorIs(t, err, io.EOF)
@@ -60,53 +74,55 @@ func TestStreamScannerHelper_ScanString(t *testing.T) {
 
 func TestStreamScannerHelper_ScanBytes(t *testing.T) {
 	input := "line1\nline2\nline3\n"
-	helper := NewScannerHelper(strings.NewReader(input))
+	helper, err := NewScannerHelper(strings.NewReader(input))
+	require.NoError(t, err)
 
 	bytes, flush, err := helper.ScanBytes()
 	require.NoError(t, err)
 	assert.Equal(t, []byte("line1"), bytes)
 	assert.False(t, flush)
+	require.Equal(t, int64(6), helper.Offset())
 
 	bytes, _, err = helper.ScanBytes()
 	require.NoError(t, err)
 	assert.Equal(t, []byte("line2"), bytes)
 	assert.False(t, flush)
+	require.Equal(t, int64(12), helper.Offset())
 
 	bytes, _, err = helper.ScanBytes()
 	require.NoError(t, err)
 	assert.Equal(t, []byte("line3"), bytes)
 	assert.False(t, flush)
+	require.Equal(t, int64(18), helper.Offset())
 
 	_, flush, err = helper.ScanString()
 	assert.ErrorIs(t, err, io.EOF)
 	assert.True(t, flush)
 }
 
-func TestStreamScannerHelper_FlushByItems(t *testing.T) {
-	input := "a\nb\nc\n"
-	helper := NewScannerHelper(strings.NewReader(input), encoding.WithFlushItems(2))
+func TestStreamScannerHelper_InitialOffset(t *testing.T) {
+	input := "line1\nline2\nline3\n"
 
-	_, flush, err := helper.ScanString()
+	// Skip "line1\n" by setting offset to 6
+	helper, err := NewScannerHelper(strings.NewReader(input), encoding.WithOffset(6))
 	require.NoError(t, err)
+
+	require.Equal(t, int64(6), helper.Offset())
+
+	line, flush, err := helper.ScanString()
+	require.NoError(t, err)
+	assert.Equal(t, "line2", line)
 	assert.False(t, flush)
+	require.Equal(t, int64(12), helper.Offset())
+
+	line, flush, err = helper.ScanString()
+	require.NoError(t, err)
+	assert.Equal(t, "line3", line)
+	assert.False(t, flush)
+	require.Equal(t, int64(18), helper.Offset())
 
 	_, flush, err = helper.ScanString()
-	require.NoError(t, err)
-	assert.True(t, flush)
-
-	_, flush, err = helper.ScanString()
-	require.NoError(t, err)
-	assert.False(t, flush)
-}
-
-func TestStreamScannerHelper_FlushByBytes(t *testing.T) {
-	input := "aaa\nbbb\n"
-
-	// Each line is 3 bytes + 1 newline = 4 bytes
-	helper := NewScannerHelper(strings.NewReader(input), encoding.WithFlushBytes(4))
-
-	_, flush, err := helper.ScanString()
-	require.NoError(t, err)
+	assert.ErrorIs(t, err, io.EOF)
 	assert.True(t, flush)
 }
 

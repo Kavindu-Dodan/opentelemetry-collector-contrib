@@ -13,6 +13,11 @@ import (
 	"go.opentelemetry.io/collector/pdata/ptrace"
 )
 
+const (
+	defaultFlushBytes = 1024 * 1024 // 1MB
+	defaultFlushItems = 1000        // 1000 items
+)
+
 // LogsMarshalerExtension is an extension that marshals logs.
 type LogsMarshalerExtension interface {
 	extension.Extension
@@ -26,10 +31,14 @@ type LogsUnmarshalerExtension interface {
 }
 
 // LogsDecoder unmarshals logs from a stream, returning one batch per DecodeLogs call.
-// DecodeLogs is expected to be called iteratively to read all derived plog.Logs batches from the stream.
-// The last batch of logs should be returned with a nil error. io.EOF error should follow on the subsequent call.
 type LogsDecoder interface {
+	// DecodeLogs is expected to be called iteratively to read all derived plog.Logs batches from the stream.
+	// The last batch of logs should be returned with a nil error. io.EOF error should follow on the subsequent call.
 	DecodeLogs() (plog.Logs, error)
+	// OffSet returns the current offset read from the stream.
+	// The exact meaning of the offset may vary by decoder (e.g. bytes, lines, records).
+	// You may use this value with WithOffset option to resume reading from the same offset when retrying after a failure.
+	OffSet() int64
 }
 
 // LogsDecoderExtension is an extension that unmarshals logs from a stream.
@@ -51,10 +60,14 @@ type MetricsUnmarshalerExtension interface {
 }
 
 // MetricsDecoder unmarshals metrics from a stream, returning one batch per DecodeMetrics call.
-// DecodeMetrics is expected to be called iteratively to read all derived pmetric.Metrics batches from the stream.
-// The last batch of metrics should be returned with a nil error. io.EOF error should follow on the subsequent call.
 type MetricsDecoder interface {
+	// DecodeMetrics is expected to be called iteratively to read all derived pmetric.Metrics batches from the stream.
+	// The last batch of metrics should be returned with a nil error. io.EOF error should follow on the subsequent call.
 	DecodeMetrics() (pmetric.Metrics, error)
+	// OffSet returns the current offset read from the stream.
+	// The exact meaning of the offset may vary by decoder (e.g. bytes, lines, records).
+	// You may use this value with WithOffset option to resume reading from the same offset when retrying after a failure.
+	OffSet() int64
 }
 
 // MetricsDecoderExtension is an extension that unmarshals metrics from a stream.
@@ -88,15 +101,33 @@ type ProfilesUnmarshalerExtension interface {
 }
 
 // DecoderOptions configures the behavior of stream decoding.
+// FlushBytes and FlushItems control how often the decoder should flush decoded data from the stream.
+// Offset defines the initial stream offset for the stream.
+// Use NewDecoderOptions to construct with default options.
 type DecoderOptions struct {
 	FlushBytes int64
 	FlushItems int64
+	Offset     int64
+}
+
+func NewDecoderOptions(opts ...DecoderOption) DecoderOptions {
+	options := DecoderOptions{
+		FlushBytes: defaultFlushBytes,
+		FlushItems: defaultFlushItems,
+		Offset:     0,
+	}
+
+	for _, o := range opts {
+		o(&options)
+	}
+	return options
 }
 
 // DecoderOption defines the functional option for DecoderOptions.
 type DecoderOption func(*DecoderOptions)
 
 // WithFlushBytes sets the number of bytes after stream decoder should flush.
+// Use WithFlushBytes(0) to disable flushing by byte count.
 func WithFlushBytes(b int64) DecoderOption {
 	return func(o *DecoderOptions) {
 		o.FlushBytes = b
@@ -104,8 +135,17 @@ func WithFlushBytes(b int64) DecoderOption {
 }
 
 // WithFlushItems sets the number of items after stream decoder should flush.
+// Use WithFlushItems(0) to disable flushing by item count.
 func WithFlushItems(i int64) DecoderOption {
 	return func(o *DecoderOptions) {
 		o.FlushItems = i
+	}
+}
+
+// WithOffset defines the initial stream offset for the stream.
+// The exact meaning of the offset may vary by decoder (e.g. bytes, lines, records).
+func WithOffset(offset int64) DecoderOption {
+	return func(o *DecoderOptions) {
+		o.Offset = offset
 	}
 }

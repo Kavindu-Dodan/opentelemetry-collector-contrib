@@ -6,6 +6,7 @@ package textencodingextension // import "github.com/open-telemetry/opentelemetry
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"io"
 	"regexp"
 	"time"
@@ -26,7 +27,8 @@ type textLogCodec struct {
 }
 
 func (r *textLogCodec) UnmarshalLogs(buf []byte) (plog.Logs, error) {
-	decoder, err := r.NewLogsDecoder(bytes.NewReader(buf))
+	// Decode as a stream but flush all at once using flush options
+	decoder, err := r.NewLogsDecoder(bytes.NewReader(buf), encoding.WithOffset(0), encoding.WithFlushBytes(0))
 	if err != nil {
 		return plog.Logs{}, err
 	}
@@ -39,6 +41,7 @@ func (r *textLogCodec) UnmarshalLogs(buf []byte) (plog.Logs, error) {
 	return logs, nil
 }
 
+// NewLogsDecoder implements the encoding.LogsCodec interface. Tracks offset by text splits
 func (r *textLogCodec) NewLogsDecoder(reader io.Reader, options ...encoding.DecoderOption) (encoding.LogsDecoder, error) {
 	s := bufio.NewScanner(reader)
 	if r.unmarshalingSeparator != nil {
@@ -66,8 +69,28 @@ func (r *textLogCodec) NewLogsDecoder(reader io.Reader, options ...encoding.Deco
 		})
 	}
 
+	offset := int64(0)
 	batchHelper := xstreamencoding.NewBatchHelper(options...)
-	return xstreamencoding.LogsDecoderFunc(func() (plog.Logs, error) {
+
+	// discard offset reads from the scanner
+	if batchHelper.Options().Offset > 0 {
+		for ; offset < batchHelper.Options().Offset; offset++ {
+			if !s.Scan() {
+				if err := s.Err(); err != nil {
+					return nil, err
+				}
+
+				return nil, fmt.Errorf("EOF reached before offset %d was fully discarded", batchHelper.Options().Offset)
+			}
+			_ = s.Bytes()
+		}
+	}
+
+	offsetF := func() int64 {
+		return offset
+	}
+
+	decodeF := func() (plog.Logs, error) {
 		p := plog.NewLogs()
 		now := pcommon.NewTimestampFromTime(time.Now())
 
@@ -84,6 +107,8 @@ func (r *textLogCodec) NewLogsDecoder(reader io.Reader, options ...encoding.Deco
 
 			batchHelper.IncrementItems(1)
 			batchHelper.IncrementBytes(int64(len(b)))
+			offset++
+
 			if batchHelper.ShouldFlush() {
 				batchHelper.Reset()
 				return p, nil
@@ -100,7 +125,9 @@ func (r *textLogCodec) NewLogsDecoder(reader io.Reader, options ...encoding.Deco
 		}
 
 		return p, nil
-	}), nil
+	}
+
+	return xstreamencoding.NewLogsDecoderAdapter(decodeF, offsetF), nil
 }
 
 func (r *textLogCodec) MarshalLogs(ld plog.Logs) ([]byte, error) {

@@ -97,20 +97,55 @@ func TestStreamDecoding_singleFlush(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, ld.LogRecordCount())
 	assert.Equal(t, "foo", ld.ResourceLogs().At(0).ScopeLogs().At(0).LogRecords().At(0).Body().AsString())
+	assert.Equal(t, int64(1), decoder.OffSet())
 
 	// Second call should return "bar"
 	ld, err = decoder.DecodeLogs()
 	require.NoError(t, err)
 	assert.Equal(t, 1, ld.LogRecordCount())
 	assert.Equal(t, "bar", ld.ResourceLogs().At(0).ScopeLogs().At(0).LogRecords().At(0).Body().AsString())
+	assert.Equal(t, int64(2), decoder.OffSet())
 
 	// Third call should return "baz"
 	ld, err = decoder.DecodeLogs()
 	require.NoError(t, err)
 	assert.Equal(t, 1, ld.LogRecordCount())
 	assert.Equal(t, "baz", ld.ResourceLogs().At(0).ScopeLogs().At(0).LogRecords().At(0).Body().AsString())
+	assert.Equal(t, int64(3), decoder.OffSet())
 
 	// Fourth call should return EOF with empty logs
+	ld, err = decoder.DecodeLogs()
+	assert.ErrorIs(t, err, io.EOF)
+	assert.Equal(t, 0, ld.LogRecordCount())
+}
+
+func TestStreamDecoding_offsetWithFlush(t *testing.T) {
+	enc, err := textutils.LookupEncoding("utf8")
+	require.NoError(t, err)
+	r := regexp.MustCompile(`\r?\n`)
+	codec := &textLogCodec{decoder: enc.NewDecoder(), unmarshalingSeparator: r, marshalingSeparator: "\n"}
+
+	reader := bytes.NewReader([]byte("foo\nbar\nbaz\n"))
+
+	// Decode with offset=1 to skip "foo", flush after each item
+	decoder, err := codec.NewLogsDecoder(reader, encoding.WithOffset(1), encoding.WithFlushItems(1))
+	require.NoError(t, err)
+
+	// First call should return "bar" (skipped "foo")
+	ld, err := decoder.DecodeLogs()
+	require.NoError(t, err)
+	assert.Equal(t, 1, ld.LogRecordCount())
+	assert.Equal(t, "bar", ld.ResourceLogs().At(0).ScopeLogs().At(0).LogRecords().At(0).Body().AsString())
+	assert.Equal(t, int64(2), decoder.OffSet())
+
+	// Second call should return "baz"
+	ld, err = decoder.DecodeLogs()
+	require.NoError(t, err)
+	assert.Equal(t, 1, ld.LogRecordCount())
+	assert.Equal(t, "baz", ld.ResourceLogs().At(0).ScopeLogs().At(0).LogRecords().At(0).Body().AsString())
+	assert.Equal(t, int64(3), decoder.OffSet())
+
+	// Third call should return EOF with empty logs
 	ld, err = decoder.DecodeLogs()
 	assert.ErrorIs(t, err, io.EOF)
 	assert.Equal(t, 0, ld.LogRecordCount())
@@ -124,8 +159,8 @@ func TestStreamDecoding_flushAll(t *testing.T) {
 
 	reader := bytes.NewReader([]byte("foo\nbar\nbaz\n"))
 
-	// Decode without flush options - should return all at once when stream ends
-	decoder, err := codec.NewLogsDecoder(reader)
+	// Decode with zero flush options to flush all records at once
+	decoder, err := codec.NewLogsDecoder(reader, encoding.WithFlushItems(0), encoding.WithFlushBytes(0))
 	require.NoError(t, err)
 
 	// First call should return all 3 records (each record in separate ResourceLogs)
