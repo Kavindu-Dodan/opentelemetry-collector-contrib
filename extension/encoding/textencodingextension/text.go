@@ -6,7 +6,6 @@ package textencodingextension // import "github.com/open-telemetry/opentelemetry
 import (
 	"bufio"
 	"bytes"
-	"fmt"
 	"io"
 	"regexp"
 	"time"
@@ -41,8 +40,18 @@ func (r *textLogCodec) UnmarshalLogs(buf []byte) (plog.Logs, error) {
 	return logs, nil
 }
 
-// NewLogsDecoder implements the encoding.LogsCodec interface. Tracks offset by text splits
+// NewLogsDecoder implements the encoding.LogsCodec interface. Tracks offset by bytes read from the stream.
 func (r *textLogCodec) NewLogsDecoder(reader io.Reader, options ...encoding.DecoderOption) (encoding.LogsDecoder, error) {
+	batchHelper := xstreamencoding.NewBatchHelper(options...)
+	offsetTracker := batchHelper.Options().Offset
+
+	// Discard non-zero offset from the reader before scanning for log records
+	if offsetTracker > 0 {
+		if _, err := io.CopyN(io.Discard, reader, offsetTracker); err != nil {
+			return nil, err
+		}
+	}
+
 	s := bufio.NewScanner(reader)
 	if r.unmarshalingSeparator != nil {
 		s.Split(func(data []byte, atEOF bool) (advance int, token []byte, err error) {
@@ -50,9 +59,11 @@ func (r *textLogCodec) NewLogsDecoder(reader io.Reader, options ...encoding.Deco
 				return 0, nil, nil
 			}
 			if loc := r.unmarshalingSeparator.FindIndex(data); len(loc) > 0 && loc[0] >= 0 {
+				offsetTracker += int64(loc[1])
 				return loc[1], data[0:loc[0]], nil
 			}
 			if atEOF {
+				offsetTracker += int64(len(data))
 				return len(data), data, nil
 			}
 			return 0, nil, nil
@@ -63,31 +74,15 @@ func (r *textLogCodec) NewLogsDecoder(reader io.Reader, options ...encoding.Deco
 				return 0, nil, nil
 			}
 			if atEOF {
+				offsetTracker += int64(len(data))
 				return len(data), data, nil
 			}
 			return 0, nil, nil // Request more data until EOF
 		})
 	}
 
-	offset := int64(0)
-	batchHelper := xstreamencoding.NewBatchHelper(options...)
-
-	// discard offset reads from the scanner
-	if batchHelper.Options().Offset > 0 {
-		for ; offset < batchHelper.Options().Offset; offset++ {
-			if !s.Scan() {
-				if err := s.Err(); err != nil {
-					return nil, err
-				}
-
-				return nil, fmt.Errorf("EOF reached before offset %d was fully discarded", batchHelper.Options().Offset)
-			}
-			_ = s.Bytes()
-		}
-	}
-
 	offsetF := func() int64 {
-		return offset
+		return offsetTracker
 	}
 
 	decodeF := func() (plog.Logs, error) {
@@ -107,7 +102,6 @@ func (r *textLogCodec) NewLogsDecoder(reader io.Reader, options ...encoding.Deco
 
 			batchHelper.IncrementItems(1)
 			batchHelper.IncrementBytes(int64(len(b)))
-			offset++
 
 			if batchHelper.ShouldFlush() {
 				batchHelper.Reset()

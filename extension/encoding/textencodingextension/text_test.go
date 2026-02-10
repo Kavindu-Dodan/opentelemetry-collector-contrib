@@ -97,21 +97,21 @@ func TestStreamDecoding_singleFlush(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, ld.LogRecordCount())
 	assert.Equal(t, "foo", ld.ResourceLogs().At(0).ScopeLogs().At(0).LogRecords().At(0).Body().AsString())
-	assert.Equal(t, int64(1), decoder.OffSet())
+	assert.Equal(t, int64(4), decoder.Offset())
 
 	// Second call should return "bar"
 	ld, err = decoder.DecodeLogs()
 	require.NoError(t, err)
 	assert.Equal(t, 1, ld.LogRecordCount())
 	assert.Equal(t, "bar", ld.ResourceLogs().At(0).ScopeLogs().At(0).LogRecords().At(0).Body().AsString())
-	assert.Equal(t, int64(2), decoder.OffSet())
+	assert.Equal(t, int64(8), decoder.Offset())
 
 	// Third call should return "baz"
 	ld, err = decoder.DecodeLogs()
 	require.NoError(t, err)
 	assert.Equal(t, 1, ld.LogRecordCount())
 	assert.Equal(t, "baz", ld.ResourceLogs().At(0).ScopeLogs().At(0).LogRecords().At(0).Body().AsString())
-	assert.Equal(t, int64(3), decoder.OffSet())
+	assert.Equal(t, int64(12), decoder.Offset())
 
 	// Fourth call should return EOF with empty logs
 	ld, err = decoder.DecodeLogs()
@@ -128,7 +128,7 @@ func TestStreamDecoding_offsetWithFlush(t *testing.T) {
 	reader := bytes.NewReader([]byte("foo\nbar\nbaz\n"))
 
 	// Decode with offset=1 to skip "foo", flush after each item
-	decoder, err := codec.NewLogsDecoder(reader, encoding.WithOffset(1), encoding.WithFlushItems(1))
+	decoder, err := codec.NewLogsDecoder(reader, encoding.WithOffset(4), encoding.WithFlushItems(1))
 	require.NoError(t, err)
 
 	// First call should return "bar" (skipped "foo")
@@ -136,14 +136,14 @@ func TestStreamDecoding_offsetWithFlush(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, ld.LogRecordCount())
 	assert.Equal(t, "bar", ld.ResourceLogs().At(0).ScopeLogs().At(0).LogRecords().At(0).Body().AsString())
-	assert.Equal(t, int64(2), decoder.OffSet())
+	assert.Equal(t, int64(8), decoder.Offset())
 
 	// Second call should return "baz"
 	ld, err = decoder.DecodeLogs()
 	require.NoError(t, err)
 	assert.Equal(t, 1, ld.LogRecordCount())
 	assert.Equal(t, "baz", ld.ResourceLogs().At(0).ScopeLogs().At(0).LogRecords().At(0).Body().AsString())
-	assert.Equal(t, int64(3), decoder.OffSet())
+	assert.Equal(t, int64(12), decoder.Offset())
 
 	// Third call should return EOF with empty logs
 	ld, err = decoder.DecodeLogs()

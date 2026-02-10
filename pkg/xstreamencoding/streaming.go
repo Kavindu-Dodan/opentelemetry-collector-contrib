@@ -183,7 +183,7 @@ func (a LogsDecoderAdapter) DecodeLogs() (plog.Logs, error) {
 	return a.decode()
 }
 
-func (a LogsDecoderAdapter) OffSet() int64 {
+func (a LogsDecoderAdapter) Offset() int64 {
 	return a.offset()
 }
 
@@ -205,6 +205,6 @@ func (a MetricsDecoderAdapter) DecodeMetrics() (pmetric.Metrics, error) {
 	return a.decode()
 }
 
-func (a MetricsDecoderAdapter) OffSet() int64 {
+func (a MetricsDecoderAdapter) Offset() int64 {
 	return a.offset()
 }

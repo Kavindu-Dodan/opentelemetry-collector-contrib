@@ -35,10 +35,10 @@ type LogsDecoder interface {
 	// DecodeLogs is expected to be called iteratively to read all derived plog.Logs batches from the stream.
 	// The last batch of logs should be returned with a nil error. io.EOF error should follow on the subsequent call.
 	DecodeLogs() (plog.Logs, error)
-	// OffSet returns the current offset read from the stream.
+	// Offset returns the offset after the most recent batch read from the stream, or the initial offset.
 	// The exact meaning of the offset may vary by decoder (e.g. bytes, lines, records).
 	// You may use this value with WithOffset option to resume reading from the same offset when retrying after a failure.
-	OffSet() int64
+	Offset() int64
 }
 
 // LogsDecoderExtension is an extension that unmarshals logs from a stream.
@@ -64,10 +64,10 @@ type MetricsDecoder interface {
 	// DecodeMetrics is expected to be called iteratively to read all derived pmetric.Metrics batches from the stream.
 	// The last batch of metrics should be returned with a nil error. io.EOF error should follow on the subsequent call.
 	DecodeMetrics() (pmetric.Metrics, error)
-	// OffSet returns the current offset read from the stream.
+	// Offset returns the offset after the most recent batch read from the stream, or the initial offset.
 	// The exact meaning of the offset may vary by decoder (e.g. bytes, lines, records).
 	// You may use this value with WithOffset option to resume reading from the same offset when retrying after a failure.
-	OffSet() int64
+	Offset() int64
 }
 
 // MetricsDecoderExtension is an extension that unmarshals metrics from a stream.
