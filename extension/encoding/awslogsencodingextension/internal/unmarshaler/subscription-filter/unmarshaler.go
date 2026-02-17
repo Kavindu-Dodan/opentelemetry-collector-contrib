@@ -92,33 +92,37 @@ func (f *subscriptionFilterUnmarshaler) NewLogsDecoder(reader io.Reader, _ ...en
 	var isEOF bool
 	return xstreamencoding.NewLogsDecoderAdapter(
 		func() (plog.Logs, error) {
+			logs := plog.NewLogs()
+			resourceLogsByKey := make(map[resourceGroupKey]plog.LogRecordSlice)
+
 			if isEOF {
-				return plog.NewLogs(), io.EOF
+				return logs, io.EOF
 			}
 
-			var cwLog cloudwatchLogsData
 			decoder := gojson.NewDecoder(reader)
-			if err := decoder.Decode(&cwLog); err != nil {
-				return plog.Logs{}, fmt.Errorf("failed to decode decompressed reader: %w", err)
-			}
+			for decoder.More() {
+				var cwLog cloudwatchLogsData
+				if err := decoder.Decode(&cwLog); err != nil {
+					return plog.Logs{}, fmt.Errorf("failed to decode decompressed reader: %w", err)
+				}
 
-			if cwLog.MessageType == "CONTROL_MESSAGE" {
-				return plog.NewLogs(), nil
-			}
+				if cwLog.MessageType == "CONTROL_MESSAGE" {
+					continue
+				}
 
-			if err := validateLog(cwLog); err != nil {
-				return plog.Logs{}, fmt.Errorf("invalid cloudwatch log: %w", err)
+				if err := validateLog(cwLog); err != nil {
+					return plog.Logs{}, fmt.Errorf("invalid cloudwatch log: %w", err)
+				}
+
+				f.appendLogs(logs, resourceLogsByKey, cwLog)
 			}
 
 			isEOF = true
-			return f.createLogs(cwLog), nil
+			return logs, nil
 		}, func() int64 {
 			return int64(0)
 		},
 	), nil
-}
-
-	return logs, nil
 }
 
 // appendLogs appends log records from cwLog into the given plog.Logs, reusing

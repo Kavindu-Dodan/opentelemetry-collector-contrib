@@ -61,7 +61,7 @@ func BenchmarkUnmarshalUnmarshalPlainTextLogs(b *testing.B) {
 		b.Run(name, func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
-				_, err := u.unmarshalPlainTextLogs(bytes.NewReader(data))
+				_, err := u.UnmarshalAWSLogs(bytes.NewReader(data))
 				require.NoError(b, err)
 			}
 		})

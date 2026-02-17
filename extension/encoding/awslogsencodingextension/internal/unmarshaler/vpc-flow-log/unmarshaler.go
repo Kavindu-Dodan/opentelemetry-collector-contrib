@@ -231,62 +231,6 @@ func (v *vpcFlowLogUnmarshaler) NewLogsDecoder(reader io.Reader, options ...enco
 	return xstreamencoding.NewLogsDecoderAdapter(decodeF, offsetF), nil
 }
 
-func (v *vpcFlowLogUnmarshaler) unmarshalPlainTextLogs(reader io.Reader) (plog.Logs, error) {
-	// use buffered reader for efficiency and to avoid any size restrictions
-	bufReader := bufio.NewReader(reader)
-
-	b, err := bufReader.ReadByte()
-	if err != nil {
-		return plog.Logs{}, fmt.Errorf("failed to read first byte: %w", err)
-	}
-
-	err = bufReader.UnreadByte()
-	if err != nil {
-		return plog.Logs{}, fmt.Errorf("failed to unread first byte: %w", err)
-	}
-
-	if b == '{' {
-		// Dealing with a JSON logs, so check for CW bound trigger
-		return v.fromCloudWatch(v.cfg.parsedFormat, bufReader)
-	}
-
-	// This is S3 bound data, so use fromS3
-	return v.fromS3(bufReader)
-}
-
-// fromS3 expects VPC logs from S3 in plain text format
-func (v *vpcFlowLogUnmarshaler) fromS3(reader *bufio.Reader) (plog.Logs, error) {
-	var err error
-	line, err := reader.ReadString('\n')
-	if err != nil {
-		return plog.Logs{}, fmt.Errorf("failed to read first line of VPC logs from S3: %w", err)
-	}
-
-	fields := strings.Fields(line)
-	logs, resourceLogs, scopeLogs := v.createLogs()
-	for {
-		line, err = reader.ReadString('\n')
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				// Reached the end of the file, add the last line and exit
-				// EOF is ignored as we have already processed all log lines
-				if addLogErr := v.addToLogs(resourceLogs, scopeLogs, fields, strings.TrimSpace(line)); addLogErr != nil {
-					return plog.Logs{}, addLogErr
-				}
-				break
-			}
-
-			return plog.Logs{}, fmt.Errorf("error reading VPC logs: %w", err)
-		}
-
-		if err := v.addToLogs(resourceLogs, scopeLogs, fields, strings.TrimSpace(line)); err != nil {
-			return plog.Logs{}, err
-		}
-	}
-
-	return logs, nil
-}
-
 // fromCloudWatch expects VPC logs from CloudWatch Logs subscription filter trigger
 func (v *vpcFlowLogUnmarshaler) fromCloudWatch(fields []string, reader *bufio.Reader) (plog.Logs, error) {
 	var cwLog events.CloudwatchLogsData
