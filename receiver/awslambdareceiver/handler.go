@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -24,6 +25,8 @@ import (
 	conventions "go.opentelemetry.io/otel/semconv/v1.38.0"
 	"go.uber.org/zap"
 
+	"github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/xstreamencoding"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/awslambdareceiver/internal"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/awslambdareceiver/internal/metadata"
 )
@@ -33,7 +36,9 @@ type emits interface {
 }
 
 type (
-	unmarshalFunc[T emits]       func([]byte) (T, error)
+	logsDecoderF    func(reader io.Reader, options ...encoding.DecoderOption) (encoding.LogsDecoder, error)
+	metricsDecoderF func(reader io.Reader, options ...encoding.DecoderOption) (encoding.MetricsDecoder, error)
+
 	s3EventConsumerFunc[T emits] func(context.Context, events.S3EventRecord, T) error
 	handlerRegistry              map[eventType]func() lambdaEventHandler
 )
@@ -86,23 +91,39 @@ type lambdaEventHandler interface {
 
 // s3Handler is specialized in S3 object event handling
 type s3Handler[T emits] struct {
-	s3Service     internal.S3Service
-	logger        *zap.Logger
-	s3Unmarshaler unmarshalFunc[T]
-	consumer      s3EventConsumerFunc[T]
+	s3Service internal.S3Service
+	logger    *zap.Logger
+
+	logsDecoderF    logsDecoderF
+	metricsDecoderF metricsDecoderF
+	consumer        s3EventConsumerFunc[T]
 }
 
-func newS3Handler[T emits](
+func newS3LogsHandler[T emits](
 	service internal.S3Service,
 	baseLogger *zap.Logger,
-	unmarshal unmarshalFunc[T],
+	logsDecoder logsDecoderF,
 	consumer s3EventConsumerFunc[T],
 ) *s3Handler[T] {
 	return &s3Handler[T]{
-		s3Service:     service,
-		logger:        baseLogger.Named("s3"),
-		s3Unmarshaler: unmarshal,
-		consumer:      consumer,
+		s3Service:    service,
+		logger:       baseLogger.Named("s3"),
+		logsDecoderF: logsDecoder,
+		consumer:     consumer,
+	}
+}
+
+func newS3MetricsHandler[T emits](
+	service internal.S3Service,
+	baseLogger *zap.Logger,
+	metricsDecoder metricsDecoderF,
+	consumer s3EventConsumerFunc[T],
+) *s3Handler[T] {
+	return &s3Handler[T]{
+		s3Service:       service,
+		logger:          baseLogger.Named("s3"),
+		metricsDecoderF: metricsDecoder,
+		consumer:        consumer,
 	}
 }
 
@@ -111,6 +132,7 @@ func (*s3Handler[T]) handlerType() eventType {
 }
 
 func (s *s3Handler[T]) handle(ctx context.Context, event json.RawMessage) error {
+	var err error
 	parsedEvent, err := s.parseEvent(event)
 	if err != nil {
 		return fmt.Errorf("failed to parse the event: %w", err)
@@ -127,18 +149,60 @@ func (s *s3Handler[T]) handle(ctx context.Context, event json.RawMessage) error 
 		return nil
 	}
 
-	body, err := s.s3Service.ReadObject(ctx, parsedEvent.S3.Bucket.Name, parsedEvent.S3.Object.URLDecodedKey)
+	reader, err := s.s3Service.GetReader(ctx, parsedEvent.S3.Bucket.Name, parsedEvent.S3.Object.URLDecodedKey)
 	if err != nil {
 		return err
 	}
 
-	data, err := s.s3Unmarshaler(body)
-	if err != nil {
-		return fmt.Errorf("failed to unmarshal S3 data: %w", err)
-	}
+	defer reader.Close()
 
-	if err := s.consumer(ctx, parsedEvent, data); err != nil {
-		return checkConsumerErrorAndWrap(err)
+	var data T
+	switch any(data).(type) {
+	case plog.Logs:
+		var logsDecoder encoding.LogsDecoder
+		logsDecoder, err = s.logsDecoderF(reader)
+		if err != nil {
+			return fmt.Errorf("failed to derive the decoder for S3 logs: %w", err)
+		}
+
+		for {
+			var logs plog.Logs
+			logs, err = logsDecoder.DecodeLogs()
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					break
+				}
+
+				return fmt.Errorf("failed to decode S3 logs: %w", err)
+			}
+
+			enrichS3Logs(logs, parsedEvent)
+			if err = s.consumer(ctx, parsedEvent, any(logs).(T)); err != nil {
+				return checkConsumerErrorAndWrap(err)
+			}
+		}
+	case pmetric.Metrics:
+		var metricsDecoder encoding.MetricsDecoder
+		metricsDecoder, err = s.metricsDecoderF(reader)
+		if err != nil {
+			return fmt.Errorf("failed to derive the decoder for S3 metrics: %w", err)
+		}
+
+		for {
+			var metrics pmetric.Metrics
+			metrics, err = metricsDecoder.DecodeMetrics()
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					break
+				}
+
+				return fmt.Errorf("failed to decode S3 metrics: %w", err)
+			}
+
+			if err := s.consumer(ctx, parsedEvent, any(metrics).(T)); err != nil {
+				return checkConsumerErrorAndWrap(err)
+			}
+		}
 	}
 
 	return nil
@@ -160,17 +224,17 @@ func (*s3Handler[T]) parseEvent(raw json.RawMessage) (event events.S3EventRecord
 
 // cwLogsSubscriptionHandler is specialized in CloudWatch log stream subscription filter events
 type cwLogsSubscriptionHandler struct {
-	unmarshal unmarshalFunc[plog.Logs]
-	consumer  func(context.Context, plog.Logs) error
+	logsDecoderF logsDecoderF
+	consumer     func(context.Context, plog.Logs) error
 }
 
 func newCWLogsSubscriptionHandler(
-	unmarshal unmarshalFunc[plog.Logs],
+	logsDecoder logsDecoderF,
 	consumer func(context.Context, plog.Logs) error,
 ) *cwLogsSubscriptionHandler {
 	return &cwLogsSubscriptionHandler{
-		unmarshal: unmarshal,
-		consumer:  consumer,
+		logsDecoderF: logsDecoder,
+		consumer:     consumer,
 	}
 }
 
@@ -197,30 +261,35 @@ func (c *cwLogsSubscriptionHandler) handle(ctx context.Context, event json.RawMe
 
 	defer reader.Close()
 
-	var decodedData bytes.Buffer
-	_, err = decodedData.ReadFrom(reader)
+	decoder, err := c.logsDecoderF(reader)
 	if err != nil {
-		return fmt.Errorf("failed to read decompressed data from cloudwatch subscription event: %w", err)
+		return fmt.Errorf("failed to derive the decoder for CloudWatch logs: %w", err)
 	}
 
-	data, err := c.unmarshal(decodedData.Bytes())
+	logs, err := decoder.DecodeLogs()
 	if err != nil {
-		return fmt.Errorf("failed to unmarshal CloudWatch logs: %w", err)
+		return err
 	}
-	if err := c.consumer(ctx, data); err != nil {
+
+	if err := c.consumer(ctx, logs); err != nil {
 		return checkConsumerErrorAndWrap(err)
 	}
 
 	return nil
 }
 
-// cwLogsToPlogs implements unmarshalFunc for plog.Logs.
+// cwLogsToPlogs implements logsDecoderF for plog.Logs.
 // This defines the built-in behavior for CloudWatch subscription filter events when no encoding extension is provided.
-func cwLogsToPlogs(data []byte) (plog.Logs, error) {
-	var cwLog events.CloudwatchLogsData
-	err := gojson.Unmarshal(data, &cwLog)
+func cwLogsToPlogs(reader io.Reader, _ ...encoding.DecoderOption) (encoding.LogsDecoder, error) {
+	data, err := io.ReadAll(reader)
 	if err != nil {
-		return plog.Logs{}, fmt.Errorf("failed to unmarshal data from cloudwatch logs event: %w", err)
+		return nil, err
+	}
+
+	var cwLog events.CloudwatchLogsData
+	err = gojson.Unmarshal(data, &cwLog)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal data from cloudwatch logs event: %w", err)
 	}
 
 	logs := plog.NewLogs()
@@ -242,16 +311,34 @@ func cwLogsToPlogs(data []byte) (plog.Logs, error) {
 		logRecord.Body().SetStr(event.Message)
 	}
 
-	return logs, err
+	isEOF := false
+	return xstreamencoding.NewLogsDecoderAdapter(
+			func() (plog.Logs, error) {
+				if isEOF {
+					return plog.NewLogs(), io.EOF
+				}
+
+				isEOF = true
+				return logs, nil
+			},
+			func() int64 {
+				return 0
+			}),
+		nil
 }
 
-// bytesToPlogs implements unmarshalFunc for plog.Logs.
+// bytesToPlogs implements logsDecoderF for plog.Logs.
 // This defines the built-in behavior for S3 events when no encoding extension is provided.
-func bytesToPlogs(data []byte) (plog.Logs, error) {
+func bytesToPlogs(reader io.Reader, _ ...encoding.DecoderOption) (encoding.LogsDecoder, error) {
 	logs := plog.NewLogs()
 	rl := logs.ResourceLogs().AppendEmpty()
 	sl := rl.ScopeLogs().AppendEmpty()
 	sl.Scope().SetName(metadata.ScopeName)
+
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, err
+	}
 
 	lr := sl.LogRecords().AppendEmpty()
 	if utf8.Valid(data) {
@@ -260,7 +347,20 @@ func bytesToPlogs(data []byte) (plog.Logs, error) {
 		lr.Body().SetEmptyBytes().FromRaw(data)
 	}
 
-	return logs, nil
+	isEOF := false
+	return xstreamencoding.NewLogsDecoderAdapter(
+			func() (plog.Logs, error) {
+				if isEOF {
+					return plog.NewLogs(), io.EOF
+				}
+
+				isEOF = true
+				return logs, nil
+			},
+			func() int64 {
+				return 0
+			}),
+		nil
 }
 
 func enrichS3Logs(logs plog.Logs, event events.S3EventRecord) {

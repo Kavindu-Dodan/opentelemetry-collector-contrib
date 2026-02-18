@@ -22,6 +22,7 @@ import (
 	"go.opentelemetry.io/collector/receiver"
 	"go.uber.org/zap"
 
+	"github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/awslambdareceiver/internal"
 )
 
@@ -228,26 +229,26 @@ func newLogsHandler(
 	s3Provider internal.S3Provider,
 ) (handlerProvider, error) {
 	logger := set.Logger
-	var s3Unmarshaler unmarshalFunc[plog.Logs] = bytesToPlogs
+	var s3LogsDecoder logsDecoderF = bytesToPlogs
 	if cfg.S3.Encoding != "" {
 		logger.Info("Using configured S3 encoding for logs", zap.String("encoding", cfg.S3.Encoding))
-		extension, err := loadEncodingExtension[plog.Unmarshaler](host, cfg.S3.Encoding, "logs")
+		extension, err := loadEncodingExtension[encoding.LogsDecoderExtension](host, cfg.S3.Encoding, "logs")
 		if err != nil {
 			return nil, err
 		}
 
-		s3Unmarshaler = extension.UnmarshalLogs
+		s3LogsDecoder = extension.NewLogsDecoder
 	}
 
-	var cwUnmarshaler unmarshalFunc[plog.Logs] = cwLogsToPlogs
+	var cwUnmarshaler logsDecoderF = cwLogsToPlogs
 	if cfg.CloudWatch.Encoding != "" {
 		logger.Info("Using configured CloudWatch encoding for logs", zap.String("encoding", cfg.CloudWatch.Encoding))
-		extension, err := loadEncodingExtension[plog.Unmarshaler](host, cfg.CloudWatch.Encoding, "logs")
+		extension, err := loadEncodingExtension[encoding.LogsDecoderExtension](host, cfg.CloudWatch.Encoding, "logs")
 		if err != nil {
 			return nil, err
 		}
 
-		cwUnmarshaler = extension.UnmarshalLogs
+		cwUnmarshaler = extension.NewLogsDecoder
 	}
 
 	s3Service, err := s3Provider.GetService(ctx)
@@ -264,7 +265,7 @@ func newLogsHandler(
 			return next.ConsumeLogs(ctx, logs)
 		}
 
-		return newS3Handler(s3Service, logger, s3Unmarshaler, logsConsumer)
+		return newS3LogsHandler(s3Service, logger, s3LogsDecoder, logsConsumer)
 	}
 
 	registry[cwEvent] = func() lambdaEventHandler {
@@ -290,7 +291,7 @@ func newMetricsHandler(
 		extensionID = cfg.S3.Encoding
 	}
 
-	encodingExtension, err := loadEncodingExtension[pmetric.Unmarshaler](host, extensionID, "metrics")
+	encodingExtension, err := loadEncodingExtension[encoding.MetricsDecoderExtension](host, extensionID, "metrics")
 	if err != nil {
 		return nil, err
 	}
@@ -307,7 +308,7 @@ func newMetricsHandler(
 			return next.ConsumeMetrics(ctx, metrics)
 		}
 
-		return newS3Handler(s3Service, set.Logger, encodingExtension.UnmarshalMetrics, metricConsumer)
+		return newS3MetricsHandler(s3Service, set.Logger, encodingExtension.NewMetricsDecoder, metricConsumer)
 	}
 
 	return newHandlerProvider(registry), nil
