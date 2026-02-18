@@ -7,8 +7,10 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.32.11
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.96.3
 	github.com/goccy/go-json v0.10.5
+	github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding v0.147.0
 	github.com/open-telemetry/opentelemetry-collector-contrib/pkg/golden v0.147.0
 	github.com/open-telemetry/opentelemetry-collector-contrib/pkg/pdatatest v0.147.0
+	github.com/open-telemetry/opentelemetry-collector-contrib/pkg/xstreamencoding v0.147.0
 	github.com/stretchr/testify v1.11.1
 	go.opentelemetry.io/collector/component v1.53.1-0.20260306010043-a44ab254898b
 	go.opentelemetry.io/collector/component/componenttest v0.147.1-0.20260306010043-a44ab254898b
@@ -17,6 +19,7 @@ require (
 	go.opentelemetry.io/collector/consumer v1.53.1-0.20260306010043-a44ab254898b
 	go.opentelemetry.io/collector/consumer/consumererror v0.147.1-0.20260306010043-a44ab254898b
 	go.opentelemetry.io/collector/consumer/consumertest v0.147.1-0.20260306010043-a44ab254898b
+	go.opentelemetry.io/collector/extension v1.53.1-0.20260306010043-a44ab254898b
 	go.opentelemetry.io/collector/pdata v1.53.1-0.20260306010043-a44ab254898b
 	go.opentelemetry.io/collector/receiver v1.53.1-0.20260306010043-a44ab254898b
 	go.opentelemetry.io/collector/receiver/receivertest v0.147.1-0.20260306010043-a44ab254898b
@@ -93,3 +96,7 @@ replace github.com/open-telemetry/opentelemetry-collector-contrib/pkg/pdatatest 
 replace github.com/open-telemetry/opentelemetry-collector-contrib/pkg/golden => ../../pkg/golden
 
 tool go.uber.org/mock/mockgen
+
+replace github.com/open-telemetry/opentelemetry-collector-contrib/pkg/xstreamencoding => ../../pkg/xstreamencoding
+
+replace github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding => ../../extension/encoding
