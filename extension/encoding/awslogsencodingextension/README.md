@@ -181,8 +181,10 @@ This allows streaming implementation to work independently of compression algori
 
 The table below summarizes streaming support details for each log type, along with the offset tracking mechanism,
 
-| Log Type      | Sub Log Type/Source            | Offset Tracking                   | Notes |
-|---------------|--------------------------------|-----------------------------------|-------|
+| Log Type   | Sub Log Type/Source | Offset Tracking                   | Note                                                                                                        |
+|------------|---------------------|-----------------------------------|-------------------------------------------------------------------------------------------------------------|
+| CloudTrail | Generic records     | Number of records processed       | Number of records are used as CloudTrail log arrives JSON and streaming is done on internal `Records` array |
+| CloudTrail | Digest record       | Always 0 (full payload processed) |                                                                                                             |
 
 ## Produced Records per Format
 
