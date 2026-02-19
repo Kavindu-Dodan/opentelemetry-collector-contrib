@@ -15,9 +15,11 @@ import (
 	"go.opentelemetry.io/collector/pdata/plog"
 	conventions "go.opentelemetry.io/otel/semconv/v1.38.0"
 
+	"github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding/awslogsencodingextension/internal/constants"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding/awslogsencodingextension/internal/metadata"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding/awslogsencodingextension/internal/unmarshaler"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/xstreamencoding"
 )
 
 var (
@@ -45,12 +47,14 @@ func validateLog(log cloudwatchLogsData) error {
 	return nil
 }
 
-type subscriptionFilterUnmarshaler struct {
+var _ unmarshaler.StreamingLogsUnmarshaler = (*SubscriptionFilterUnmarshaler)(nil)
+
+type SubscriptionFilterUnmarshaler struct {
 	buildInfo component.BuildInfo
 }
 
-func NewSubscriptionFilterUnmarshaler(buildInfo component.BuildInfo) unmarshaler.AWSUnmarshaler {
-	return &subscriptionFilterUnmarshaler{
+func NewSubscriptionFilterUnmarshaler(buildInfo component.BuildInfo) *SubscriptionFilterUnmarshaler {
+	return &SubscriptionFilterUnmarshaler{
 		buildInfo: buildInfo,
 	}
 }
@@ -61,36 +65,74 @@ func NewSubscriptionFilterUnmarshaler(buildInfo component.BuildInfo) unmarshaler
 // logs are further grouped by their extracted account ID and region.
 // Logs are assumed to be gzip-compressed as specified at
 // https://docs.aws.amazon.com/firehose/latest/dev/writing-with-cloudwatch-logs.html.
-func (f *subscriptionFilterUnmarshaler) UnmarshalAWSLogs(reader io.Reader) (plog.Logs, error) {
-	logs := plog.NewLogs()
-	resourceLogsByKey := make(map[resourceGroupKey]plog.LogRecordSlice)
-
-	decoder := gojson.NewDecoder(reader)
-	for decoder.More() {
-		var cwLog cloudwatchLogsData
-		if err := decoder.Decode(&cwLog); err != nil {
-			return plog.Logs{}, fmt.Errorf("failed to decode decompressed reader: %w", err)
+func (f *SubscriptionFilterUnmarshaler) UnmarshalAWSLogs(reader io.Reader) (plog.Logs, error) {
+	// Decode as a stream but flush all at once using flush options
+	streamUnmarshaler, err := f.NewLogsDecoder(reader, encoding.WithFlushItems(0), encoding.WithFlushBytes(0))
+	if err != nil {
+		return plog.Logs{}, err
+	}
+	logs, err := streamUnmarshaler.DecodeLogs()
+	if err != nil {
+		// we must check for EOF with direct comparison and avoid wrapped EOF that can come from stream itself
+		//nolint:errorlint
+		if err == io.EOF {
+			// EOF indicates no logs were found, return any logs that's available
+			return logs, nil
 		}
 
-		if cwLog.MessageType == "CONTROL_MESSAGE" {
-			continue
-		}
-
-		if err := validateLog(cwLog); err != nil {
-			return plog.Logs{}, fmt.Errorf("invalid cloudwatch log: %w", err)
-		}
-
-		f.appendLogs(logs, resourceLogsByKey, cwLog)
+		return plog.Logs{}, err
 	}
 
 	return logs, nil
+}
+
+// NewLogsDecoder returns a LogsDecoder that processes CloudWatch Logs subscription filter events.
+// Supported sub formats:
+//   - DATA_MESSAGE: Returns logs grouped by owner, log group, and stream; offset is always 0
+//   - CONTROL_MESSAGE: Returns empty log; offset is always 0
+func (f *SubscriptionFilterUnmarshaler) NewLogsDecoder(reader io.Reader, _ ...encoding.DecoderOption) (encoding.LogsDecoder, error) {
+	// Note - no real streaming as CloudWatch Logs subscription filter events are small in size
+	var isEOF bool
+	return xstreamencoding.NewLogsDecoderAdapter(
+		func() (plog.Logs, error) {
+			logs := plog.NewLogs()
+			resourceLogsByKey := make(map[resourceGroupKey]plog.LogRecordSlice)
+
+			if isEOF {
+				return logs, io.EOF
+			}
+
+			decoder := gojson.NewDecoder(reader)
+			for decoder.More() {
+				var cwLog cloudwatchLogsData
+				if err := decoder.Decode(&cwLog); err != nil {
+					return plog.Logs{}, fmt.Errorf("failed to decode decompressed reader: %w", err)
+				}
+
+				if cwLog.MessageType == "CONTROL_MESSAGE" {
+					continue
+				}
+
+				if err := validateLog(cwLog); err != nil {
+					return plog.Logs{}, fmt.Errorf("invalid cloudwatch log: %w", err)
+				}
+
+				f.appendLogs(logs, resourceLogsByKey, cwLog)
+			}
+
+			isEOF = true
+			return logs, nil
+		}, func() int64 {
+			return int64(0)
+		},
+	), nil
 }
 
 // appendLogs appends log records from cwLog into the given plog.Logs, reusing
 // existing ResourceLogs entries tracked by resourceLogsByKey when possible.
 // Events are grouped by their extracted fields (account ID + region) and
 // by log group/stream combination.
-func (f *subscriptionFilterUnmarshaler) appendLogs(logs plog.Logs, resourceLogsByKey map[resourceGroupKey]plog.LogRecordSlice, cwLog cloudwatchLogsData) {
+func (f *SubscriptionFilterUnmarshaler) appendLogs(logs plog.Logs, resourceLogsByKey map[resourceGroupKey]plog.LogRecordSlice, cwLog cloudwatchLogsData) {
 	for _, event := range cwLog.LogEvents {
 		key := extractResourceKey(event, cwLog.Owner, cwLog.LogGroup, cwLog.LogStream)
 
