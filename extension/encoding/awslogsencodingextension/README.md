@@ -181,8 +181,10 @@ This allows streaming implementation to work independently of compression algori
 
 The table below summarizes streaming support details for each log type, along with the offset tracking mechanism,
 
-| Log Type      | Sub Log Type/Source            | Offset Tracking                   | Notes |
-|---------------|--------------------------------|-----------------------------------|-------|
+| Log Type      | Sub Log Type/Source            | Offset Tracking | Notes |
+|---------------|--------------------------------|-----------------|-------|
+| VPC Flow Logs | S3 plain text                  | Bytes processed |       |
+| VPC Flow Logs | CloudWatch subscription filter | Bytes processed |       |
 
 ## Produced Records per Format
 
