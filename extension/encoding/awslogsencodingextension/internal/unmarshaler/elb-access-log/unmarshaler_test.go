@@ -103,6 +103,10 @@ func TestUnmarshallELBAccessLogs(t *testing.T) {
 			reader:      readAndCompressLogFile(t, filesDirectory, "elb_invalid_syntax.log"),
 			expectedErr: "failed to parse log line",
 		},
+		"control message handling": {
+			reader:               strings.NewReader("Enable ConnectionLog for ELB\n"),
+			logsExpectedFilename: "control_message_expected.yaml",
+		},
 	}
 	// Create a mock logger
 	logger := zaptest.NewLogger(t)

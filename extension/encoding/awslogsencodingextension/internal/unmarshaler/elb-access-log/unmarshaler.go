@@ -76,20 +76,6 @@ func (f *ElbAccessLogUnmarshaler) NewLogsDecoder(reader io.Reader, options ...en
 		return nil, err
 	}
 
-	if syntax == controlMessage {
-		f.logger.Info("ELB Control message received")
-
-		// Emit control message as empty log message.
-		return xstreamencoding.NewLogsDecoderAdapter(
-			func() (plog.Logs, error) {
-				return plog.Logs{}, nil
-			},
-			func() int64 {
-				return 0
-			},
-		), nil
-	}
-
 	scannerHelper, err := xstreamencoding.NewScannerHelper(bufReader, options...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create scanner helper: %w", err)
@@ -128,6 +114,8 @@ func (f *ElbAccessLogUnmarshaler) NewLogsDecoder(reader io.Reader, options ...en
 				err = f.handleNLBAccessLogs(fields, resourceAttr, scopeLogs)
 			case clbAccessLogs:
 				err = f.handleCLBAccessLogs(fields, resourceAttr, scopeLogs)
+			case controlMessage:
+				// Control messages are conveyed as empty logs
 			}
 			if err != nil {
 				return plog.Logs{}, err
@@ -141,7 +129,8 @@ func (f *ElbAccessLogUnmarshaler) NewLogsDecoder(reader io.Reader, options ...en
 		f.setResourceAttributes(resourceAttr, resourceLogs)
 
 		if scopeLogs.LogRecords().Len() == 0 {
-			return plog.Logs{}, io.EOF
+			// return empty log with EOF
+			return plog.NewLogs(), io.EOF
 		}
 
 		return logs, nil
