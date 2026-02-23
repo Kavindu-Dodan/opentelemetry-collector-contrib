@@ -77,6 +77,7 @@ func (f *formatOpenTelemetry10Unmarshaler) NewMetricsDecoder(reader io.Reader, o
 	decodeF := func() (pmetric.Metrics, error) {
 		md := pmetric.NewMetrics()
 
+		var buf []byte
 		for {
 			peek, err := bufReader.Peek(binary.MaxVarintLen64)
 			if err != nil && !errors.Is(err, io.EOF) {
@@ -100,8 +101,14 @@ func (f *formatOpenTelemetry10Unmarshaler) NewMetricsDecoder(reader io.Reader, o
 				return pmetric.Metrics{}, fmt.Errorf("unable to discard varint: %w", err)
 			}
 
+			// Reuse buffer, grow only if needed
+			if cap(buf) < int(toRead) {
+				buf = make([]byte, toRead)
+			} else {
+				buf = buf[:toRead]
+			}
+
 			// Read the OTLP metric message
-			buf := make([]byte, toRead)
 			_, err = io.ReadFull(bufReader, buf)
 			if err != nil {
 				return pmetric.Metrics{}, fmt.Errorf("unable to read OTLP metric message: %w", err)
