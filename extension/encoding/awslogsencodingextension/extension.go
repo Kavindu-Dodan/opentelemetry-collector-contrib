@@ -4,6 +4,7 @@
 package awslogsencodingextension // import "github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding/awslogsencodingextension"
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -193,47 +194,44 @@ func (e *encodingExtension) UnmarshalLogs(buf []byte) (plog.Logs, error) {
 }
 
 // NewLogsDecoder returns a LogsDecoder if the underlying unmarshaler supports streaming.
-// Caller must perform any decompression before passing the reader to the decoder.
-// Implementations must utilize derived buffered readers as is.
 func (e *encodingExtension) NewLogsDecoder(reader io.Reader, options ...encoding.DecoderOption) (encoding.LogsDecoder, error) {
-	if u, ok := e.unmarshaler.(awsunmarshaler.StreamingLogsUnmarshaler); ok {
-		return u.NewLogsDecoder(reader, options...)
-	}
-
-	return nil, fmt.Errorf("streaming not supported for format %q", e.format)
-}
-
-func (e *encodingExtension) getGzipReader(buf []byte) (io.Reader, error) {
-	var err error
-	gzipReader, ok := e.gzipPool.Get().(*gzip.Reader)
+	u, ok := e.unmarshaler.(awsunmarshaler.StreamingLogsUnmarshaler)
 	if !ok {
-		gzipReader, err = gzip.NewReader(bytes.NewReader(buf))
-	} else {
-		err = gzipReader.Reset(bytes.NewBuffer(buf))
+		return nil, fmt.Errorf("streaming not supported for format %q", e.format)
 	}
 
+	wrappedReader, err := wrapWithGzipReaderIfNeeded(reader)
 	if err != nil {
-		if gzipReader != nil {
-			e.gzipPool.Put(gzipReader)
-		}
-		return nil, fmt.Errorf("failed to decompress content: %w", err)
+		return nil, fmt.Errorf("failed to wrap reader for %q logs: %w", e.format, err)
 	}
 
-	return gzipReader, nil
+	return u.NewLogsDecoder(wrappedReader, options...)
 }
 
-// isGzipData checks if the buffer contains gzip-compressed data by examining magic bytes
-func isGzipData(buf []byte) bool {
-	return len(buf) > 2 && buf[0] == 0x1f && buf[1] == 0x8b
-}
-
-// getReaderForData returns the appropriate reader and encoding type based on data format
-func (e *encodingExtension) getReaderForData(buf []byte) (string, io.Reader, error) {
-	if isGzipData(buf) {
-		reader, err := e.getGzipReader(buf)
-		return gzipEncoding, reader, err
+// wrapWithGzipReaderIfNeeded wrap with gzip reader if needed
+func wrapWithGzipReaderIfNeeded(reader io.Reader) (io.Reader, error) {
+	if _, ok := reader.(*gzip.Reader); ok {
+		return reader, nil
 	}
-	return bytesEncoding, bytes.NewReader(buf), nil
+
+	var bufReader *bufio.Reader
+	if br, ok := reader.(*bufio.Reader); ok {
+		bufReader = br
+	} else {
+		// Note - No option to override the default buffer size without knowing caller's intention.
+		bufReader = bufio.NewReader(reader)
+	}
+
+	peek, err := bufReader.Peek(2)
+	if err != nil {
+		return nil, err
+	}
+
+	if isGzip(peek[0], peek[1]) {
+		return gzip.NewReader(bufReader)
+	}
+
+	return bufReader, nil
 }
 
 func (e *encodingExtension) getReaderFromFormat(buf []byte) (string, io.Reader, error) {
@@ -263,4 +261,37 @@ func (e *encodingExtension) getReaderFromFormat(buf []byte) (string, io.Reader, 
 		// should not be possible
 		return "", nil, fmt.Errorf("unimplemented: format %q has no reader", e.format)
 	}
+}
+
+// getReaderForData returns the appropriate reader and encoding type based on data format
+func (e *encodingExtension) getReaderForData(buf []byte) (string, io.Reader, error) {
+	if len(buf) >= 2 && isGzip(buf[0], buf[1]) {
+		reader, err := e.getGzipReader(buf)
+		return gzipEncoding, reader, err
+	}
+	return bytesEncoding, bytes.NewReader(buf), nil
+}
+
+func (e *encodingExtension) getGzipReader(buf []byte) (io.Reader, error) {
+	var err error
+	gzipReader, ok := e.gzipPool.Get().(*gzip.Reader)
+	if !ok {
+		gzipReader, err = gzip.NewReader(bytes.NewReader(buf))
+	} else {
+		err = gzipReader.Reset(bytes.NewReader(buf))
+	}
+
+	if err != nil {
+		if gzipReader != nil {
+			e.gzipPool.Put(gzipReader)
+		}
+		return nil, fmt.Errorf("failed to decompress content: %w", err)
+	}
+
+	return gzipReader, nil
+}
+
+// isGzip checks if the buffer contains gzip-compressed data by examining magic bytes
+func isGzip(b1, b2 byte) bool {
+	return b1 == 0x1f && b2 == 0x8b
 }
