@@ -145,7 +145,8 @@ func (v *VPCFlowLogUnmarshaler) NewLogsDecoder(reader io.Reader, options ...enco
 	if firstByte[0] == '{' {
 		// Dealing with a JSON log message, so check for CloudWatch bound trigger
 		var cwLogs plog.Logs
-		cwLogs, err = v.fromCloudWatch(v.cfg.parsedFormat, bufReader)
+		var offset int64
+		cwLogs, offset, err = v.fromCloudWatch(v.cfg.parsedFormat, bufReader)
 		if err != nil {
 			return nil, err
 		}
@@ -161,7 +162,7 @@ func (v *VPCFlowLogUnmarshaler) NewLogsDecoder(reader io.Reader, options ...enco
 				return cwLogs, nil
 			},
 			func() int64 {
-				return 0
+				return offset
 			},
 		), nil
 	}
@@ -234,11 +235,13 @@ func (v *VPCFlowLogUnmarshaler) NewLogsDecoder(reader io.Reader, options ...enco
 }
 
 // fromCloudWatch expects VPC logs from CloudWatch Logs subscription filter trigger
-func (v *VPCFlowLogUnmarshaler) fromCloudWatch(fields []string, reader *bufio.Reader) (plog.Logs, error) {
+func (v *VPCFlowLogUnmarshaler) fromCloudWatch(fields []string, reader *bufio.Reader) (plog.Logs, int64, error) {
 	var cwLog events.CloudwatchLogsData
-	err := gojson.NewDecoder(reader).Decode(&cwLog)
+
+	decoder := gojson.NewDecoder(reader)
+	err := decoder.Decode(&cwLog)
 	if err != nil {
-		return plog.Logs{}, fmt.Errorf("failed to unmarshal data as cloudwatch logs event: %w", err)
+		return plog.Logs{}, 0, fmt.Errorf("failed to unmarshal data as cloudwatch logs event: %w", err)
 	}
 
 	logs, resourceLogs, scopeLogs := v.createLogs()
@@ -250,11 +253,11 @@ func (v *VPCFlowLogUnmarshaler) fromCloudWatch(fields []string, reader *bufio.Re
 	for _, event := range cwLog.LogEvents {
 		err := v.addToLogs(resourceLogs, scopeLogs, fields, event.Message)
 		if err != nil {
-			return plog.Logs{}, err
+			return plog.Logs{}, 0, err
 		}
 	}
 
-	return logs, nil
+	return logs, decoder.InputOffset(), nil
 }
 
 // createLogs is a helper to create prefilled plog.Logs, plog.ResourceLogs, plog.ScopeLogs
