@@ -92,6 +92,8 @@ func (f *SubscriptionFilterUnmarshaler) UnmarshalAWSLogs(reader io.Reader) (plog
 //   - CONTROL_MESSAGE: Returns empty log; offset is always 0
 func (f *SubscriptionFilterUnmarshaler) NewLogsDecoder(reader io.Reader, _ ...encoding.DecoderOption) (encoding.LogsDecoder, error) {
 	// Note - no real streaming as CloudWatch Logs subscription filter events are small in size
+	decoder := gojson.NewDecoder(reader)
+
 	var isEOF bool
 	return xstreamencoding.NewLogsDecoderAdapter(
 		func() (plog.Logs, error) {
@@ -102,7 +104,6 @@ func (f *SubscriptionFilterUnmarshaler) NewLogsDecoder(reader io.Reader, _ ...en
 				return logs, io.EOF
 			}
 
-			decoder := gojson.NewDecoder(reader)
 			for decoder.More() {
 				var cwLog cloudwatchLogsData
 				if err := decoder.Decode(&cwLog); err != nil {
@@ -123,7 +124,7 @@ func (f *SubscriptionFilterUnmarshaler) NewLogsDecoder(reader io.Reader, _ ...en
 			isEOF = true
 			return logs, nil
 		}, func() int64 {
-			return int64(0)
+			return decoder.InputOffset()
 		},
 	), nil
 }
