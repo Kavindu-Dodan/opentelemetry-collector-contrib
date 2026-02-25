@@ -181,12 +181,13 @@ This allows streaming implementation to work independently of compression algori
 
 The table below summarizes streaming support details for each log type, along with the offset tracking mechanism,
 
-| Log Type            | Sub Log Type/Source | Offset Tracking                   | Notes                                                                                                       |
-|---------------------|---------------------|-----------------------------------|-------------------------------------------------------------------------------------------------------------|
-| CloudTrail          | Generic records     | Number of records processed       | Number of records are used as CloudTrail log arrives JSON and streaming is done on internal `Records` array |
-| CloudTrail          | Digest record       | Always 0 (full payload processed) |                                                                                                             |
-| Network Firewall    | Alert/Flow/TLS      | Bytes processed                   |                                                                                                             |
-| Subscription filter | -                   | Number of records processed       | Supports processing multi-line inputs and offset tracks number of records that get processed                |
+| Log Type            | Sub Log Type/Source | Offset Tracking             | Notes                                                                                                       |
+|---------------------|---------------------|-----------------------------|-------------------------------------------------------------------------------------------------------------|
+| CloudTrail          | Generic records     | Number of records processed | Number of records are used as CloudTrail log arrives JSON and streaming is done on internal `Records` array |
+| CloudTrail          | CloudWatch trigger  | Number of bytes processed   |                                                                                                             |
+| CloudTrail          | Digest record       | Number of bytes processed   |                                                                                                             |
+| Network Firewall    | Alert/Flow/TLS      | Bytes processed             |                                                                                                             |
+| Subscription filter | -                   | Number of records processed | Supports processing multi-line inputs and offset tracks number of records that get processed                |
 
 ## Produced Records per Format
 

@@ -237,7 +237,7 @@ func (u *CloudTrailLogUnmarshaler) NewLogsDecoder(reader io.Reader, options ...e
 		isEOF = true
 		return record, nil
 	}
-	return xstreamencoding.NewLogsDecoderAdapter(decoderF, func() int64 { return 0 }), nil
+	return xstreamencoding.NewLogsDecoderAdapter(decoderF, func() int64 { return decoder.InputOffset() }), nil
 }
 
 // processRecords is specialized in processing CloudTrail log records with streaming support
@@ -329,7 +329,9 @@ func (u *CloudTrailLogUnmarshaler) processRecords(decoder *gojson.Decoder, optio
 // Processes full record and Offset is from 0.
 func (u *CloudTrailLogUnmarshaler) fromCloudWatch(reader *bufio.Reader) (encoding.LogsDecoder, error) {
 	var cwLog events.CloudwatchLogsData
-	if err := gojson.NewDecoder(reader).Decode(&cwLog); err != nil {
+
+	decoder := gojson.NewDecoder(reader)
+	if err := decoder.Decode(&cwLog); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal data as cloudwatch logs event: %w", err)
 	}
 
@@ -386,7 +388,7 @@ func (u *CloudTrailLogUnmarshaler) fromCloudWatch(reader *bufio.Reader) (encodin
 		return logs, nil
 	}
 
-	return xstreamencoding.NewLogsDecoderAdapter(decoderF, func() int64 { return 0 }), nil
+	return xstreamencoding.NewLogsDecoderAdapter(decoderF, func() int64 { return decoder.InputOffset() }), nil
 }
 
 // processDigestRecord is specialized in processing CloudTrail digest records
