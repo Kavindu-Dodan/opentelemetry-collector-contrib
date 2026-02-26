@@ -181,9 +181,9 @@ This allows streaming implementation to work independently of compression algori
 
 The table below summarizes streaming support details for each log type, along with the offset tracking mechanism,
 
-| Log Type            | Sub Log Type/Source | Offset Tracking | Notes |
-|---------------------|---------------------|-----------------|-------|
-| Subscription filter | -                   | Bytes processed |       |
+| Log Type            | Sub Log Type/Source | Offset Tracking             | Notes                                                                                        |
+|---------------------|---------------------|-----------------------------|----------------------------------------------------------------------------------------------|
+| Subscription filter | -                   | Number of records processed | Supports processing muiti-line inputs and offset tracks number of records that get processed |
 
 ## Produced Records per Format
 

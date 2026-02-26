@@ -28,25 +28,6 @@ var (
 	errEmptyLogStream = errors.New("cloudwatch log with message type 'DATA_MESSAGE' has empty log stream field")
 )
 
-func validateLog(log cloudwatchLogsData) error {
-	switch log.MessageType {
-	case "DATA_MESSAGE":
-		if log.Owner == "" {
-			return errEmptyOwner
-		}
-		if log.LogGroup == "" {
-			return errEmptyLogGroup
-		}
-		if log.LogStream == "" {
-			return errEmptyLogStream
-		}
-	case "CONTROL_MESSAGE":
-	default:
-		return fmt.Errorf("cloudwatch log has invalid message type %q", log.MessageType)
-	}
-	return nil
-}
-
 var _ unmarshaler.StreamingLogsUnmarshaler = (*SubscriptionFilterUnmarshaler)(nil)
 
 type SubscriptionFilterUnmarshaler struct {
@@ -88,27 +69,41 @@ func (f *SubscriptionFilterUnmarshaler) UnmarshalAWSLogs(reader io.Reader) (plog
 
 // NewLogsDecoder returns a LogsDecoder that processes CloudWatch Logs subscription filter events.
 // Supported sub formats:
-//   - DATA_MESSAGE: Returns logs grouped by owner, log group, and stream; offset is always 0
-//   - CONTROL_MESSAGE: Returns empty log; offset is always 0
-func (f *SubscriptionFilterUnmarshaler) NewLogsDecoder(reader io.Reader, _ ...encoding.DecoderOption) (encoding.LogsDecoder, error) {
-	// Note - no real streaming as CloudWatch Logs subscription filter events are small in size
+//   - DATA_MESSAGE: Returns logs grouped by owner, log group, and stream; offset is the number of records processed
+//   - CONTROL_MESSAGE: Returns empty log; offset is the number of records processed
+func (f *SubscriptionFilterUnmarshaler) NewLogsDecoder(reader io.Reader, options ...encoding.DecoderOption) (encoding.LogsDecoder, error) {
+	batchHelper := xstreamencoding.NewBatchHelper(options...)
 	decoder := gojson.NewDecoder(reader)
 
-	var isEOF bool
+	var offset int64
+
+	if batchHelper.Options().Offset > 0 {
+		for offset < batchHelper.Options().Offset {
+			if !decoder.More() {
+				return nil, fmt.Errorf("EOF reached before offset %d records were discarded", batchHelper.Options().Offset)
+			}
+
+			var raw gojson.RawMessage
+			if err := decoder.Decode(&raw); err != nil {
+				return nil, err
+			}
+			offset++
+		}
+	}
+
 	return xstreamencoding.NewLogsDecoderAdapter(
 		func() (plog.Logs, error) {
 			logs := plog.NewLogs()
 			resourceLogsByKey := make(map[resourceGroupKey]plog.LogRecordSlice)
-
-			if isEOF {
-				return logs, io.EOF
-			}
 
 			for decoder.More() {
 				var cwLog cloudwatchLogsData
 				if err := decoder.Decode(&cwLog); err != nil {
 					return plog.Logs{}, fmt.Errorf("failed to decode decompressed reader: %w", err)
 				}
+
+				offset++
+				batchHelper.IncrementItems(1)
 
 				if cwLog.MessageType == "CONTROL_MESSAGE" {
 					continue
@@ -119,12 +114,20 @@ func (f *SubscriptionFilterUnmarshaler) NewLogsDecoder(reader io.Reader, _ ...en
 				}
 
 				f.appendLogs(logs, resourceLogsByKey, cwLog)
+
+				if batchHelper.ShouldFlush() {
+					batchHelper.Reset()
+					return logs, nil
+				}
 			}
 
-			isEOF = true
+			if logs.ResourceLogs().Len() == 0 {
+				return plog.NewLogs(), io.EOF
+			}
+
 			return logs, nil
 		}, func() int64 {
-			return decoder.InputOffset()
+			return offset
 		},
 	), nil
 }
@@ -183,4 +186,23 @@ func extractResourceKey(event cloudwatchLogsLogEvent, owner, logGroup, logStream
 		key.accountID = owner
 	}
 	return key
+}
+
+func validateLog(log cloudwatchLogsData) error {
+	switch log.MessageType {
+	case "DATA_MESSAGE":
+		if log.Owner == "" {
+			return errEmptyOwner
+		}
+		if log.LogGroup == "" {
+			return errEmptyLogGroup
+		}
+		if log.LogStream == "" {
+			return errEmptyLogStream
+		}
+	case "CONTROL_MESSAGE":
+	default:
+		return fmt.Errorf("cloudwatch log has invalid message type %q", log.MessageType)
+	}
+	return nil
 }
