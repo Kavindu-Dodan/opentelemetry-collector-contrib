@@ -151,7 +151,6 @@ extension/datadogextension
 extension/encoding/avrologencodingextension
 pkg/xstreamencoding
 extension/encoding/awscloudwatchmetricstreamsencodingextension
-pkg/xstreamencoding
 extension/encoding/awslogsencodingextension
 extension/encoding/azureencodingextension
 extension/encoding/googlecloudlogentryencodingextension
