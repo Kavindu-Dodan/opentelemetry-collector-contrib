@@ -143,11 +143,13 @@ extension/asapauthextension
 internal/aws/proxy
 extension/awsproxy
 extension/azureauthextension
+extension/internal/credentialsfile
 extension/basicauthextension
 extension/bearertokenauthextension
 extension/cgroupruntimeextension
 extension/datadogextension
 extension/encoding/avrologencodingextension
+pkg/xstreamencoding
 extension/encoding/awscloudwatchmetricstreamsencodingextension
 pkg/xstreamencoding
 extension/encoding/awslogsencodingextension
