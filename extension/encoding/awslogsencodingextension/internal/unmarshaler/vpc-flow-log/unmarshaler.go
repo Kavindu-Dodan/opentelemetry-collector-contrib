@@ -179,12 +179,12 @@ func (v *VPCFlowLogUnmarshaler) NewLogsDecoder(reader io.Reader, options ...enco
 	batchHelper := xstreamencoding.NewBatchHelper(options...)
 
 	if batchHelper.Options().Offset > 0 {
-		// discard ignoring the first line
+		// discard bytes, ignoring the first line
 		var discarded int
 		discarded, err = bufReader.Discard(int(batchHelper.Options().Offset - offset))
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				return nil, fmt.Errorf("EOF reached before offset %d records were discarded", batchHelper.Options().Offset)
+				return nil, fmt.Errorf("EOF reached before offset %d bytes were discarded", batchHelper.Options().Offset)
 			}
 			return nil, err
 		}
