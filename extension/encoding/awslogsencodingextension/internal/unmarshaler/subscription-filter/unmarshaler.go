@@ -22,6 +22,8 @@ import (
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/xstreamencoding"
 )
 
+const ctrlMessageType = "CONTROL_MESSAGE"
+
 var (
 	errEmptyOwner     = errors.New("cloudwatch log with message type 'DATA_MESSAGE' has empty owner field")
 	errEmptyLogGroup  = errors.New("cloudwatch log with message type 'DATA_MESSAGE' has empty log group field")
@@ -105,7 +107,7 @@ func (f *SubscriptionFilterUnmarshaler) NewLogsDecoder(reader io.Reader, options
 				offset++
 				batchHelper.IncrementItems(1)
 
-				if cwLog.MessageType == "CONTROL_MESSAGE" {
+				if cwLog.MessageType == ctrlMessageType {
 					continue
 				}
 
@@ -200,7 +202,7 @@ func validateLog(log cloudwatchLogsData) error {
 		if log.LogStream == "" {
 			return errEmptyLogStream
 		}
-	case "CONTROL_MESSAGE":
+	case ctrlMessageType:
 	default:
 		return fmt.Errorf("cloudwatch log has invalid message type %q", log.MessageType)
 	}
