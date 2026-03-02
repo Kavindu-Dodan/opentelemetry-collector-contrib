@@ -347,7 +347,7 @@ func (f *ElbAccessLogUnmarshaler) addToALBAccessLogs(resourceAttr *resourceAttri
 func (f *ElbAccessLogUnmarshaler) handleNLBAccessLogs(fields []string, resourceAttr *resourceAttributes, scopeLogs plog.ScopeLogs) error {
 	record, err := convertTextToNLBAccessLogRecord(fields)
 	if err != nil {
-		return fmt.Errorf("unable to convert log line to ALB record: %w", err)
+		return fmt.Errorf("unable to convert log line to NLB record: %w", err)
 	}
 	f.addToNLBAccessLogs(resourceAttr, scopeLogs, record)
 	return nil
