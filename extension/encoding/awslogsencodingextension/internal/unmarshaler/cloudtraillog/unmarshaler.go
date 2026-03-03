@@ -175,8 +175,8 @@ func (u *CloudTrailLogUnmarshaler) UnmarshalAWSLogs(reader io.Reader) (plog.Logs
 // NewLogsDecoder returns a streaming logs decoder. It detects format type for CloudTrail logs and processes accordingly.
 // Supported sub formats, how they are processed and what offset conveys for each:
 //   - S3 Records: Offset tracked by the number of records processed
-//   - CloudWatch subscription filter: Processes full payload; offset is always 0
-//   - Digest file: Single record output; offset is always 0
+//   - CloudWatch subscription filter: Processes full payload; offset tracked by bytes processed
+//   - Digest file: Single record output; offset tracked by bytes processed
 func (u *CloudTrailLogUnmarshaler) NewLogsDecoder(reader io.Reader, options ...encoding.DecoderOption) (encoding.LogsDecoder, error) {
 	var bufferedReader *bufio.Reader
 	if br, ok := reader.(*bufio.Reader); ok {
@@ -326,7 +326,7 @@ func (u *CloudTrailLogUnmarshaler) processRecords(decoder *gojson.Decoder, optio
 }
 
 // fromCloudWatch handles CloudTrail logs from CloudWatch Logs subscription filter.
-// Processes full record and Offset is from 0.
+// Processes full record and track offset by full processed bytes.
 func (u *CloudTrailLogUnmarshaler) fromCloudWatch(reader *bufio.Reader) (encoding.LogsDecoder, error) {
 	var cwLog events.CloudwatchLogsData
 
