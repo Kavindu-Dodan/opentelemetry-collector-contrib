@@ -187,6 +187,7 @@ The table below summarizes streaming support details for each log type, along wi
 | Subscription filter | -                              | Number of records processed | Supports processing multi-line inputs and offset tracks number of records that get processed |
 | VPC Flow Logs       | S3 plain text                  | Bytes processed             |                                                                                              |
 | VPC Flow Logs       | CloudWatch subscription filter | Bytes processed             |                                                                                              |
+| WAF Logs            | -                              | Bytes processed             |                                                                                              |
 
 ## Produced Records per Format
 
