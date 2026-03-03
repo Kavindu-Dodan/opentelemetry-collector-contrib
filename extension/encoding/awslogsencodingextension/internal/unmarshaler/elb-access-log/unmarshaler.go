@@ -68,7 +68,7 @@ func (f *ElbAccessLogUnmarshaler) UnmarshalAWSLogs(reader io.Reader) (plog.Logs,
 // Auto-detects the ELB Log type (ALB, NLB, CLB, or control message) using the first log line.
 // Supported sub formats:
 //   - ALB/NLB/CLB access logs: Supports offset-based streaming; offset tracks bytes processed
-//   - Control message: Returns empty log; offset is always 0
+//   - Control message: Returns empty log; offset tracks bytes processed
 func (f *ElbAccessLogUnmarshaler) NewLogsDecoder(reader io.Reader, options ...encoding.DecoderOption) (encoding.LogsDecoder, error) {
 	bufReader := bufio.NewReader(reader)
 	syntax, err := peekAndGetSyntax(bufReader)
