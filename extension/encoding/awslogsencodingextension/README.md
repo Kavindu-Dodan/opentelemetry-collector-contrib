@@ -181,9 +181,10 @@ This allows streaming implementation to work independently of compression algori
 
 The table below summarizes streaming support details for each log type, along with the offset tracking mechanism,
 
-| Log Type | Sub Log Type/Source | Offset Tracking | Notes |
-|----------|---------------------|-----------------|-------|
-| WAF Logs | -                   | Bytes processed |       |
+| Log Type         | Sub Log Type/Source | Offset Tracking | Notes |
+|------------------|---------------------|-----------------|-------|
+| Network Firewall | Alert/Flow/TLS      | Bytes processed |       |
+| WAF Logs         | -                   | Bytes processed |       |
 
 ## Produced Records per Format
 
