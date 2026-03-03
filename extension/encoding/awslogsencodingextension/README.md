@@ -183,6 +183,7 @@ The table below summarizes streaming support details for each log type, along wi
 
 | Log Type            | Sub Log Type/Source | Offset Tracking             | Notes                                                                                        |
 |---------------------|---------------------|-----------------------------|----------------------------------------------------------------------------------------------|
+| Network Firewall    | Alert/Flow/TLS      | Bytes processed             |                                                                                              |
 | Subscription filter | -                   | Number of records processed | Supports processing multi-line inputs and offset tracks number of records that get processed |
 
 ## Produced Records per Format
