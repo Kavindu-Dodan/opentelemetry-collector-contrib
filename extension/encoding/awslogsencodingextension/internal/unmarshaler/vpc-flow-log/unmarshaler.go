@@ -125,8 +125,8 @@ func (v *VPCFlowLogUnmarshaler) UnmarshalAWSLogs(reader io.Reader) (plog.Logs, e
 // NewLogsDecoder returns a LogsDecoder that processes VPC flow logs from the provided reader.
 // Auto-detects the source format (S3 plain text or CloudWatch subscription filter) from the first byte.
 // Supported sub formats:
-//   - S3 plain text logs: Supports offset-based streaming; offset tracks bytes processed
-//   - CloudWatch subscription filter: Processes full payload; offset is always 0
+//   - S3 plain text logs: Supports offset-based streaming; offset tracked by bytes processed
+//   - CloudWatch subscription filter: Processes full payload; offset tracked by bytes processed
 //   - Parquet format: Not yet implemented
 func (v *VPCFlowLogUnmarshaler) NewLogsDecoder(reader io.Reader, options ...encoding.DecoderOption) (encoding.LogsDecoder, error) {
 	if v.cfg.FileFormat == constants.FileFormatParquet {
