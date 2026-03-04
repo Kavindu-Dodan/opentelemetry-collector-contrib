@@ -5,12 +5,10 @@ package internal // import "github.com/open-telemetry/opentelemetry-collector-co
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"fmt"
 	"io"
 
-	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 
@@ -24,23 +22,18 @@ type DecodeWrapper struct {
 	unmarshalMetric func(buf []byte) (pmetric.Metrics, error)
 }
 
-// NewLogsDecoderWrapper creates a DecodeWrapper for logs.
-func NewLogsDecoderWrapper(unmarshalLog func(buf []byte) (plog.Logs, error)) *DecodeWrapper {
+// NewLogsDecoder creates a DecodeWrapper for logs.
+func NewLogsDecoder(unmarshalLog func(buf []byte) (plog.Logs, error)) *DecodeWrapper {
 	return &DecodeWrapper{
 		unmarshalLog: unmarshalLog,
 	}
 }
 
-// NewMetricsDecoderWrapper creates a DecodeWrapper for metrics.
-func NewMetricsDecoderWrapper(unmarshalMetric func(buf []byte) (pmetric.Metrics, error)) *DecodeWrapper {
+// NewMetricsDecoder creates a DecodeWrapper for metrics.
+func NewMetricsDecoder(unmarshalMetric func(buf []byte) (pmetric.Metrics, error)) *DecodeWrapper {
 	return &DecodeWrapper{
 		unmarshalMetric: unmarshalMetric,
 	}
-}
-
-func (*DecodeWrapper) Start(_ context.Context, _ component.Host) error {
-	// NOOP
-	return nil
 }
 
 func (l *DecodeWrapper) NewLogsDecoder(reader io.Reader, options ...encoding.DecoderOption) (encoding.LogsDecoder, error) {
@@ -61,11 +54,6 @@ func (l *DecodeWrapper) NewMetricsDecoder(reader io.Reader, options ...encoding.
 	return xstreamencoding.NewMetricsDecoderAdapter(decode, offset), nil
 }
 
-func (*DecodeWrapper) Shutdown(_ context.Context) error {
-	// NOOP
-	return nil
-}
-
 // genericDecoder is a generic helper function to create decode and offset functions for both logs and metrics decoders based on the provided unmarshal function and reader.
 func genericDecoder[T plog.Logs | pmetric.Metrics](reader io.Reader, unmarshalF func(buf []byte) (T, error), zeroF func() T, options ...encoding.DecoderOption) (func() (T, error), func() int64, error) {
 	scannerHelper, err := xstreamencoding.NewScannerHelper(reader, options...)
@@ -78,8 +66,6 @@ func genericDecoder[T plog.Logs | pmetric.Metrics](reader io.Reader, unmarshalF 
 	decoderF := func() (T, error) {
 		var b []byte
 		var flush bool
-		var isEOF bool
-
 		for {
 			b, flush, err = scannerHelper.ScanBytes()
 			if err != nil {
@@ -87,7 +73,9 @@ func genericDecoder[T plog.Logs | pmetric.Metrics](reader io.Reader, unmarshalF 
 					return zeroF(), fmt.Errorf("failed to read stream data: %w", err)
 				}
 
-				isEOF = true
+				if len(b) == 0 {
+					break
+				}
 			}
 
 			buffer.Write(b)
@@ -100,10 +88,6 @@ func genericDecoder[T plog.Logs | pmetric.Metrics](reader io.Reader, unmarshalF 
 
 				buffer.Reset()
 				return logs, nil
-			}
-
-			if isEOF {
-				break
 			}
 		}
 

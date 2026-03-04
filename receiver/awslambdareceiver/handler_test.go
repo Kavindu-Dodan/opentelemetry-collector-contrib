@@ -21,7 +21,6 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/consumer/consumererror"
-	"go.opentelemetry.io/collector/extension"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.uber.org/mock/gomock"
@@ -49,7 +48,7 @@ func TestProcessLambdaEvent_S3LogNotification(t *testing.T) {
 		name          string
 		s3Event       events.S3Event
 		s3MockContent s3Content
-		extension     extension.Extension
+		extension     logsDecoderFactory
 		eventConsumer consumer.Logs
 		expectedErr   string
 	}{
@@ -231,11 +230,10 @@ func TestProcessLambdaEvent_S3LogNotification(t *testing.T) {
 				return test.eventConsumer.ConsumeLogs(ctx, logs)
 			}
 
-			handler, err := newS3LogsHandler(s3Service, zap.NewNop(), test.extension, logsConsumer)
-			require.NoError(t, err)
+			handler := newS3LogsHandler(s3Service, zap.NewNop(), test.extension, logsConsumer)
 
 			var event json.RawMessage
-			event, err = json.Marshal(test.s3Event)
+			event, err := json.Marshal(test.s3Event)
 			require.NoError(t, err)
 
 			errP := handler.handle(t.Context(), event)
@@ -324,8 +322,7 @@ func TestS3HandlerParseEvent(t *testing.T) {
 		enrichS3Logs(logs, event)
 		return consumer.ConsumeLogs(ctx, logs)
 	}
-	handler, err := newS3LogsHandler(s3Service, zap.NewNop(), &customLogUnmarshaler{}, logsConsumer)
-	require.NoError(t, err)
+	handler := newS3LogsHandler(s3Service, zap.NewNop(), &customLogUnmarshaler{}, logsConsumer)
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -350,7 +347,7 @@ func TestHandleCloudwatchLogEvent(t *testing.T) {
 	tests := []struct {
 		name          string
 		eventData     string
-		extension     extension.Extension
+		extension     logsDecoderFactory
 		eventConsumer consumer.Logs
 		expectedErr   string
 	}{
@@ -393,8 +390,7 @@ func TestHandleCloudwatchLogEvent(t *testing.T) {
 			lambdaEvent, err := json.Marshal(cwEvent)
 			require.NoError(t, err)
 
-			handler, err := newCWLogsSubscriptionHandler(test.extension, test.eventConsumer.ConsumeLogs)
-			require.NoError(t, err)
+			handler := newCWLogsSubscriptionHandler(test.extension, test.eventConsumer.ConsumeLogs)
 
 			err = handler.handle(t.Context(), lambdaEvent)
 			if test.expectedErr != "" {
@@ -519,8 +515,7 @@ func TestConsumerErrorHandling(t *testing.T) {
 				return test.consumerErr
 			}
 
-			handler, err := newS3LogsHandler(s3Service, zap.NewNop(), &customLogUnmarshaler{}, logsConsumer)
-			require.NoError(t, err)
+			handler := newS3LogsHandler(s3Service, zap.NewNop(), &customLogUnmarshaler{}, logsConsumer)
 
 			event, err := json.Marshal(mockEvent)
 			require.NoError(t, err)

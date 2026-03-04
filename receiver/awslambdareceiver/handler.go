@@ -18,7 +18,6 @@ import (
 	"github.com/aws/aws-lambda-go/events"
 	gojson "github.com/goccy/go-json"
 	"go.opentelemetry.io/collector/consumer/consumererror"
-	"go.opentelemetry.io/collector/extension"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
@@ -46,6 +45,14 @@ type (
 
 type handlerProvider interface {
 	getHandler(eventType eventType) (lambdaEventHandler, error)
+}
+
+type logsDecoderFactory interface {
+	NewLogsDecoder(reader io.Reader, options ...encoding.DecoderOption) (encoding.LogsDecoder, error)
+}
+
+type metricsDecoderFactory interface {
+	NewMetricsDecoder(reader io.Reader, options ...encoding.DecoderOption) (encoding.MetricsDecoder, error)
 }
 
 // handlerProvider is responsible for providing event handlers based on event types.
@@ -87,61 +94,37 @@ type s3Handler[T emits] struct {
 	s3Service internal.S3Service
 	logger    *zap.Logger
 
-	logsDecoder    encoding.LogsDecoderExtension
-	metricsDecoder encoding.MetricsDecoderExtension
+	logsDecoder    logsDecoderFactory
+	metricsDecoder metricsDecoderFactory
 	consumer       s3EventConsumerFunc[T]
 }
 
 func newS3LogsHandler[T emits](
 	service internal.S3Service,
 	baseLogger *zap.Logger,
-	logsExtension extension.Extension,
+	logsDecoder logsDecoderFactory,
 	consumer s3EventConsumerFunc[T],
-) (*s3Handler[T], error) {
-	var decoder encoding.LogsDecoderExtension
-	decoder, ok := logsExtension.(encoding.LogsDecoderExtension)
-	if !ok {
-		// derive a decoder wrapper if extension is of encoding.LogsUnmarshalerExtension type
-		logsUnmarshaler, t := logsExtension.(encoding.LogsUnmarshalerExtension)
-		if !t {
-			return nil, errors.New("provided extension does not implement LogsDecoder or LogsDecoderExtension interfaces")
-		}
-
-		decoder = internal.NewLogsDecoderWrapper(logsUnmarshaler.UnmarshalLogs)
-	}
-
+) *s3Handler[T] {
 	return &s3Handler[T]{
 		s3Service:   service,
 		logger:      baseLogger.Named("s3"),
-		logsDecoder: decoder,
+		logsDecoder: logsDecoder,
 		consumer:    consumer,
-	}, nil
+	}
 }
 
 func newS3MetricsHandler[T emits](
 	service internal.S3Service,
 	baseLogger *zap.Logger,
-	metricsExtension extension.Extension,
+	metricsDecoder metricsDecoderFactory,
 	consumer s3EventConsumerFunc[T],
-) (*s3Handler[T], error) {
-	var decoder encoding.MetricsDecoderExtension
-	decoder, ok := metricsExtension.(encoding.MetricsDecoderExtension)
-	if !ok {
-		// derive a decoder wrapper if extension is of encoding.MetricsUnmarshalerExtension type
-		metricsUnmarshaler, t := metricsExtension.(encoding.MetricsUnmarshalerExtension)
-		if !t {
-			return nil, errors.New("provided extension does not implement MetricsDecoder or MetricsDecoderExtension interfaces")
-		}
-
-		decoder = internal.NewMetricsDecoderWrapper(metricsUnmarshaler.UnmarshalMetrics)
-	}
-
+) *s3Handler[T] {
 	return &s3Handler[T]{
 		s3Service:      service,
 		logger:         baseLogger.Named("s3"),
-		metricsDecoder: decoder,
+		metricsDecoder: metricsDecoder,
 		consumer:       consumer,
-	}, nil
+	}
 }
 
 func (*s3Handler[T]) handlerType() eventType {
@@ -252,30 +235,18 @@ func (*s3Handler[T]) parseEvent(raw json.RawMessage) (event events.S3EventRecord
 
 // cwLogsSubscriptionHandler is specialized in CloudWatch log stream subscription filter events
 type cwLogsSubscriptionHandler struct {
-	logsDecoder encoding.LogsDecoderExtension
+	logsDecoder logsDecoderFactory
 	consumer    func(context.Context, plog.Logs) error
 }
 
 func newCWLogsSubscriptionHandler(
-	logsExtension extension.Extension,
+	logsDecoder logsDecoderFactory,
 	consumer func(context.Context, plog.Logs) error,
-) (*cwLogsSubscriptionHandler, error) {
-	var decoder encoding.LogsDecoderExtension
-	decoder, ok := logsExtension.(encoding.LogsDecoderExtension)
-	if !ok {
-		// derive a decoder wrapper if extension is of encoding.LogsUnmarshalerExtension type
-		logsUnmarshaler, t := logsExtension.(encoding.LogsUnmarshalerExtension)
-		if !t {
-			return nil, errors.New("provided extension does not implement LogsDecoder or LogsDecoderExtension interfaces")
-		}
-
-		decoder = internal.NewLogsDecoderWrapper(logsUnmarshaler.UnmarshalLogs)
-	}
-
+) *cwLogsSubscriptionHandler {
 	return &cwLogsSubscriptionHandler{
-		logsDecoder: decoder,
+		logsDecoder: logsDecoder,
 		consumer:    consumer,
-	}, nil
+	}
 }
 
 func (*cwLogsSubscriptionHandler) handlerType() eventType {
