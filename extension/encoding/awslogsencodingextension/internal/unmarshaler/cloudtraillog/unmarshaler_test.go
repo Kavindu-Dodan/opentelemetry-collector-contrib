@@ -196,6 +196,41 @@ func TestNewLogsDecoder(t *testing.T) {
 	}
 }
 
+func TestNewLogsDecoder_offsetForFormats(t *testing.T) {
+	tests := []struct {
+		name          string
+		inputLogsFile string
+		offset        int64
+	}{
+		{
+			name:          "Valid CloudTrail from CloudWatch subscription filter",
+			inputLogsFile: "cloudtrail_log_cw.json",
+			offset:        1878, // byte length of the input
+		},
+		{
+			name:          "Valid CloudTrail digest record",
+			inputLogsFile: "cloudtrail_digest.json",
+			offset:        1214, // byte length of the input
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			content := readLogFile(t, filesDirectory, tt.inputLogsFile)
+			unmarshaler := NewCloudTrailLogUnmarshaler(component.BuildInfo{Version: "test-version"}, false)
+
+			// Derive decoder with a non-zero offset
+			streamer, err := unmarshaler.NewLogsDecoder(content, encoding.WithOffset(50))
+			require.NoError(t, err)
+
+			_, err = streamer.DecodeLogs()
+			require.ErrorIs(t, err, io.EOF)
+
+			require.Equal(t, tt.offset, streamer.Offset())
+		})
+	}
+}
+
 func TestCloudTrailLogUnmarshaler_UnmarshalAWSLogs_InvalidJSON(t *testing.T) {
 	t.Parallel()
 	unmarshaler := NewCloudTrailLogUnmarshaler(component.BuildInfo{Version: "test-version"}, false)

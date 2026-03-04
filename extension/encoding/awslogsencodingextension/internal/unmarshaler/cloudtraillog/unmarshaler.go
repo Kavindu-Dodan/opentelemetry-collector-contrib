@@ -210,6 +210,30 @@ func (u *CloudTrailLogUnmarshaler) NewLogsDecoder(reader io.Reader, options ...e
 		return u.processRecords(decoder, options...)
 	}
 
+	decoderOptions := encoding.DecoderOptions{}
+	for _, option := range options {
+		option(&decoderOptions)
+	}
+
+	// For the rest of the format, if offset is set, return EOF after consuming the whole record.
+	// This confirms to our contract for these formats - process full record.
+	// But given we need full record processing, we emit empty value with an EOF & full record offset.
+	if decoderOptions.Offset > 0 {
+		err = decoder.Decode(&gojson.RawMessage{})
+		if err != nil {
+			return nil, fmt.Errorf("failed to read the input stream: %w", err)
+		}
+
+		return xstreamencoding.NewLogsDecoderAdapter(
+			func() (plog.Logs, error) {
+				return plog.NewLogs(), io.EOF
+			},
+			func() int64 {
+				return decoder.InputOffset()
+			},
+		), nil
+	}
+
 	// Check for CloudWatch subscription filter format
 	// Known CloudWatch envelope keys: messageType, owner, logGroup, logStream, subscriptionFilters, logEvents
 	if isCloudWatchKey(firstKey) {
