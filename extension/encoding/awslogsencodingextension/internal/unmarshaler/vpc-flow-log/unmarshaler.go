@@ -144,6 +144,32 @@ func (v *VPCFlowLogUnmarshaler) NewLogsDecoder(reader io.Reader, options ...enco
 
 	if firstByte[0] == '{' {
 		// Dealing with a JSON log message, so check for CloudWatch bound trigger
+
+		decoderOpts := encoding.DecoderOptions{}
+		for _, op := range options {
+			op(&decoderOpts)
+		}
+
+		// If offset is set, return EOF after consuming the whole record.
+		// This confirms to our contract - process full payload
+		// However, we cannot skip the offset bytes as we need full record unmarshaling.
+		if decoderOpts.Offset > 0 {
+			var l int64
+			l, err = io.Copy(io.Discard, bufReader)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read the input stream: %w", err)
+			}
+
+			return xstreamencoding.NewLogsDecoderAdapter(
+				func() (plog.Logs, error) {
+					return plog.NewLogs(), io.EOF
+				},
+				func() int64 {
+					return l
+				},
+			), nil
+		}
+
 		var cwLogs plog.Logs
 		var offset int64
 		cwLogs, offset, err = v.fromCloudWatch(v.cfg.parsedFormat, bufReader)

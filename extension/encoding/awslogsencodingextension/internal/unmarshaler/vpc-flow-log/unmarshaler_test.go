@@ -205,6 +205,28 @@ func TestNewLogsDecoder(t *testing.T) {
 	}
 }
 
+func TestNewLogsDecoder_offsetForFormats(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "valid_vpc_flow_cw_custom.json"))
+	require.NoError(t, err)
+
+	config := Config{
+		FileFormat: constants.FileFormatPlainText,
+	}
+
+	vpcUnmarshal, err := NewVPCFlowLogUnmarshaler(config, component.BuildInfo{}, zap.NewNop(), false)
+	require.NoError(t, err)
+
+	// Derive decoder with a non-zero offset
+	streamer, err := vpcUnmarshal.NewLogsDecoder(bytes.NewReader(data), encoding.WithOffset(50))
+	require.NoError(t, err)
+
+	_, err = streamer.DecodeLogs()
+	require.ErrorIs(t, err, io.EOF)
+
+	// Byte length of the input
+	require.Equal(t, int64(476), streamer.Offset())
+}
+
 func TestHandleAddresses(t *testing.T) {
 	t.Parallel()
 
