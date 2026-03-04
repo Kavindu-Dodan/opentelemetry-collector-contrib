@@ -23,6 +23,7 @@ import (
 	"go.opentelemetry.io/collector/receiver"
 	"go.uber.org/zap"
 
+	"github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/awslambdareceiver/internal"
 )
 
@@ -229,14 +230,26 @@ func newLogsHandler(
 	s3Provider internal.S3Provider,
 ) (handlerProvider, error) {
 	logger := set.Logger
-	var s3LogsDecoder extension.Extension = &internal.DefaultS3LogsDecoder{}
+	var s3LogsDecoder logsDecoderFactory = &internal.DefaultS3LogsDecoder{}
 	if cfg.S3.Encoding != "" {
 		logger.Info("Using configured S3 encoding for logs", zap.String("encoding", cfg.S3.Encoding))
 
-		var err error
-		s3LogsDecoder, err = loadEncodingExtension[extension.Extension](host, cfg.S3.Encoding, "logs")
+		var ext extension.Extension
+		ext, err := loadEncodingExtension[extension.Extension](host, cfg.S3.Encoding, "logs")
 		if err != nil {
 			return nil, err
+		}
+
+		var ok bool
+		s3LogsDecoder, ok = ext.(encoding.LogsDecoderExtension)
+		if !ok {
+			// derive a decoder wrapper if extension is of encoding.LogsUnmarshalerExtension type
+			logsUnmarshaler, t := ext.(encoding.LogsUnmarshalerExtension)
+			if !t {
+				return nil, errors.New("provided extension does not implement LogsDecoder or LogsUnmarshalerExtension interfaces")
+			}
+
+			s3LogsDecoder = internal.NewLogsDecoder(logsUnmarshaler.UnmarshalLogs)
 		}
 	}
 
@@ -251,30 +264,33 @@ func newLogsHandler(
 		return next.ConsumeLogs(ctx, logs)
 	}
 
-	handlerForS3, err := newS3LogsHandler(s3Service, logger, s3LogsDecoder, logsConsumer)
-	if err != nil {
-		return nil, err
-	}
-
-	var cwUnmarshaler extension.Extension = &internal.DefaultCWLogsDecoder{}
+	var cwDecoder logsDecoderFactory = &internal.DefaultCWLogsDecoder{}
 	if cfg.CloudWatch.Encoding != "" {
 		logger.Info("Using configured CloudWatch encoding for logs", zap.String("encoding", cfg.CloudWatch.Encoding))
 
-		cwUnmarshaler, err = loadEncodingExtension[extension.Extension](host, cfg.CloudWatch.Encoding, "logs")
+		var ext extension.Extension
+		ext, err = loadEncodingExtension[extension.Extension](host, cfg.CloudWatch.Encoding, "logs")
 		if err != nil {
 			return nil, err
 		}
-	}
 
-	handlerForCW, err := newCWLogsSubscriptionHandler(cwUnmarshaler, next.ConsumeLogs)
-	if err != nil {
-		return nil, err
+		var ok bool
+		cwDecoder, ok = ext.(encoding.LogsDecoderExtension)
+		if !ok {
+			// derive a decoder wrapper if extension is of encoding.LogsUnmarshalerExtension type
+			logsUnmarshaler, t := ext.(encoding.LogsUnmarshalerExtension)
+			if !t {
+				return nil, errors.New("provided extension does not implement LogsDecoder or LogsDecoderExtension interfaces")
+			}
+
+			cwDecoder = internal.NewLogsDecoder(logsUnmarshaler.UnmarshalLogs)
+		}
 	}
 
 	// Register handlers. Logs supports S3 and CloudWatch Logs subscription events.
 	registry := make(handlerRegistry)
-	registry[s3Event] = handlerForS3
-	registry[cwEvent] = handlerForCW
+	registry[s3Event] = newS3LogsHandler(s3Service, logger, s3LogsDecoder, logsConsumer)
+	registry[cwEvent] = newCWLogsSubscriptionHandler(cwDecoder, next.ConsumeLogs)
 
 	return newHandlerProvider(registry), nil
 }
@@ -295,9 +311,21 @@ func newMetricsHandler(
 		extensionID = cfg.S3.Encoding
 	}
 
-	encodingExtension, err := loadEncodingExtension[extension.Extension](host, extensionID, "metrics")
+	ext, err := loadEncodingExtension[extension.Extension](host, extensionID, "metrics")
 	if err != nil {
 		return nil, err
+	}
+
+	var decoder metricsDecoderFactory
+	decoder, ok := ext.(encoding.MetricsDecoderExtension)
+	if !ok {
+		// derive a decoder wrapper if extension is of encoding.MetricsUnmarshalerExtension type
+		metricsUnmarshaler, t := ext.(encoding.MetricsUnmarshalerExtension)
+		if !t {
+			return nil, errors.New("provided extension does not implement MetricsDecoder or MetricsUnmarshalerExtension interfaces")
+		}
+
+		decoder = internal.NewMetricsDecoder(metricsUnmarshaler.UnmarshalMetrics)
 	}
 
 	s3Service, err := s3Provider.GetService(ctx)
@@ -309,14 +337,9 @@ func newMetricsHandler(
 		return next.ConsumeMetrics(ctx, metrics)
 	}
 
-	handlerForS3, err := newS3MetricsHandler(s3Service, set.Logger, encodingExtension, metricConsumer)
-	if err != nil {
-		return nil, err
-	}
-
 	// Register handlers. Metrics supports S3 events.
 	registry := make(handlerRegistry)
-	registry[s3Event] = handlerForS3
+	registry[s3Event] = newS3MetricsHandler(s3Service, set.Logger, decoder, metricConsumer)
 
 	return newHandlerProvider(registry), nil
 }

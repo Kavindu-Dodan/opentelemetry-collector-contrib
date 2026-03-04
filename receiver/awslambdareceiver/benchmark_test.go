@@ -44,8 +44,7 @@ func BenchmarkHandleS3Notification(b *testing.B) {
 		enrichS3Logs(logs, event)
 		return consumer.ConsumeLogs(ctx, logs)
 	}
-	handler, err := newS3LogsHandler(service, zap.NewNop(), &customLogUnmarshaler{}, logsConsumer)
-	require.NoError(b, err)
+	handler := newS3LogsHandler(service, zap.NewNop(), &customLogUnmarshaler{}, logsConsumer)
 
 	b.Run("HandleS3Event", func(b *testing.B) {
 		b.ReportAllocs()

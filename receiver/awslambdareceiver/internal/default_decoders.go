@@ -4,7 +4,6 @@
 package internal // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/awslambdareceiver/internal"
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"time"
@@ -12,7 +11,6 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 	gojson "github.com/goccy/go-json"
-	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
 	conventions "go.opentelemetry.io/otel/semconv/v1.38.0"
@@ -24,11 +22,6 @@ import (
 
 // DefaultS3LogsDecoder defines the default S3 logs decoder for AWS Lambda receiver
 type DefaultS3LogsDecoder struct{}
-
-func (*DefaultS3LogsDecoder) Start(_ context.Context, _ component.Host) error {
-	// NOOP
-	return nil
-}
 
 // NewLogsDecoder returns a LogsDecoder that decodes logs from a S3 object containing logs.
 // It implements the decoder contract and process all data at once. Hence, the offset is always 0.
@@ -67,18 +60,8 @@ func (*DefaultS3LogsDecoder) NewLogsDecoder(reader io.Reader, _ ...encoding.Deco
 		nil
 }
 
-func (*DefaultS3LogsDecoder) Shutdown(_ context.Context) error {
-	// NOOP
-	return nil
-}
-
 // DefaultCWLogsDecoder defines the default CloudWatch logs decoder for AWS Lambda receiver.
 type DefaultCWLogsDecoder struct{}
-
-func (*DefaultCWLogsDecoder) Start(_ context.Context, _ component.Host) error {
-	// NOOP
-	return nil
-}
 
 // NewLogsDecoder returns a LogsDecoder that decodes logs from a CloudWatch logs event.
 // It implements the decoder contract and process all data at once. Hence, the offset is always 0.
@@ -128,9 +111,4 @@ func (*DefaultCWLogsDecoder) NewLogsDecoder(reader io.Reader, _ ...encoding.Deco
 				return int64(len(data))
 			}),
 		nil
-}
-
-func (*DefaultCWLogsDecoder) Shutdown(_ context.Context) error {
-	// NOOP
-	return nil
 }
