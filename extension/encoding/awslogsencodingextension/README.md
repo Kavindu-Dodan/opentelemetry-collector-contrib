@@ -187,6 +187,7 @@ The table below summarizes streaming support details for each log type, along wi
 | CloudTrail          | CloudWatch trigger  | Number of bytes processed   | If non-zero offset is given, then invocation returns EOF with an empty log. The offset carries the full record length |
 | CloudTrail          | Digest record       | Number of bytes processed   | If non-zero offset is given, then invocation returns EOF with an empty log. The offset carries the full record length |
 | Network Firewall    | Alert/Flow/TLS      | Bytes processed             |                                                                                                                       |
+| S3 Access Logs      | -                   | Bytes processed             |                                                                                                                       |
 | Subscription filter | -                   | Number of records processed | Supports processing multi-line inputs and offset tracks number of records that get processed                          |
 | WAF Logs            | -                   | Bytes processed             |                                                                                                                       |
 
