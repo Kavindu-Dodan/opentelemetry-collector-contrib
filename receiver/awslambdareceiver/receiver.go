@@ -230,26 +230,15 @@ func newLogsHandler(
 	s3Provider internal.S3Provider,
 ) (handlerProvider, error) {
 	logger := set.Logger
+
+	var err error
 	var s3LogsDecoder logsDecoderFactory = &internal.DefaultS3LogsDecoder{}
 	if cfg.S3.Encoding != "" {
 		logger.Info("Using configured S3 encoding for logs", zap.String("encoding", cfg.S3.Encoding))
 
-		var ext extension.Extension
-		ext, err := loadEncodingExtension[extension.Extension](host, cfg.S3.Encoding, "logs")
+		s3LogsDecoder, err = resolveLogsDecoder(host, cfg.S3.Encoding)
 		if err != nil {
 			return nil, err
-		}
-
-		var ok bool
-		s3LogsDecoder, ok = ext.(encoding.LogsDecoderExtension)
-		if !ok {
-			// derive a decoder wrapper if extension is of encoding.LogsUnmarshalerExtension type
-			logsUnmarshaler, t := ext.(encoding.LogsUnmarshalerExtension)
-			if !t {
-				return nil, errors.New("provided extension does not implement LogsDecoder or LogsUnmarshalerExtension interfaces")
-			}
-
-			s3LogsDecoder = internal.NewLogsDecoder(logsUnmarshaler.UnmarshalLogs)
 		}
 	}
 
@@ -268,22 +257,9 @@ func newLogsHandler(
 	if cfg.CloudWatch.Encoding != "" {
 		logger.Info("Using configured CloudWatch encoding for logs", zap.String("encoding", cfg.CloudWatch.Encoding))
 
-		var ext extension.Extension
-		ext, err = loadEncodingExtension[extension.Extension](host, cfg.CloudWatch.Encoding, "logs")
+		cwDecoder, err = resolveLogsDecoder(host, cfg.CloudWatch.Encoding)
 		if err != nil {
 			return nil, err
-		}
-
-		var ok bool
-		cwDecoder, ok = ext.(encoding.LogsDecoderExtension)
-		if !ok {
-			// derive a decoder wrapper if extension is of encoding.LogsUnmarshalerExtension type
-			logsUnmarshaler, t := ext.(encoding.LogsUnmarshalerExtension)
-			if !t {
-				return nil, errors.New("provided extension does not implement LogsDecoder or LogsDecoderExtension interfaces")
-			}
-
-			cwDecoder = internal.NewLogsDecoder(logsUnmarshaler.UnmarshalLogs)
 		}
 	}
 
@@ -342,6 +318,29 @@ func newMetricsHandler(
 	registry[s3Event] = newS3MetricsHandler(s3Service, set.Logger, decoder, metricConsumer)
 
 	return newHandlerProvider(registry), nil
+}
+
+func resolveLogsDecoder(host component.Host, encoderName string) (logsDecoderFactory, error) {
+	var ext extension.Extension
+	ext, err := loadEncodingExtension[extension.Extension](host, encoderName, "logs")
+	if err != nil {
+		return nil, err
+	}
+
+	var decoderFactory logsDecoderFactory
+	var ok bool
+	decoderFactory, ok = ext.(encoding.LogsDecoderExtension)
+	if !ok {
+		// derive a decoder wrapper if extension is of encoding.LogsUnmarshalerExtension type
+		logsUnmarshaler, t := ext.(encoding.LogsUnmarshalerExtension)
+		if !t {
+			return nil, errors.New("provided extension does not implement LogsDecoder or LogsUnmarshalerExtension interfaces")
+		}
+
+		decoderFactory = internal.NewLogsDecoder(logsUnmarshaler.UnmarshalLogs)
+	}
+
+	return decoderFactory, nil
 }
 
 // loadEncodingExtension attempts to load an available extension for the given name.
