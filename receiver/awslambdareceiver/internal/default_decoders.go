@@ -24,9 +24,29 @@ import (
 type DefaultS3LogsDecoder struct{}
 
 // NewLogsDecoder returns a LogsDecoder that decodes logs from a S3 object containing logs.
-// It implements the decoder contract and process all data at once. Hence, the offset is always 0.
+// It implements the decoder contract and process all data at once. Offset is full length of data in bytes.
 // Decoding adds event message as log record body and adds resource attributes for owner, log group and log stream.
-func (*DefaultS3LogsDecoder) NewLogsDecoder(reader io.Reader, _ ...encoding.DecoderOption) (encoding.LogsDecoder, error) {
+func (*DefaultS3LogsDecoder) NewLogsDecoder(reader io.Reader, opts ...encoding.DecoderOption) (encoding.LogsDecoder, error) {
+	options := encoding.DecoderOptions{}
+	for _, opt := range opts {
+		opt(&options)
+	}
+
+	if options.Offset > 0 {
+		// consume all and send an EOF
+		_, err := io.Copy(io.Discard, reader)
+		if err != nil {
+			return nil, fmt.Errorf("failed to consume reader data: %w", err)
+		}
+		return xstreamencoding.NewLogsDecoderAdapter(
+			func() (plog.Logs, error) {
+				return plog.NewLogs(), io.EOF
+			},
+			func() int64 {
+				return options.Offset
+			}), nil
+	}
+
 	logs := plog.NewLogs()
 	rl := logs.ResourceLogs().AppendEmpty()
 	sl := rl.ScopeLogs().AppendEmpty()
@@ -64,12 +84,27 @@ func (*DefaultS3LogsDecoder) NewLogsDecoder(reader io.Reader, _ ...encoding.Deco
 type DefaultCWLogsDecoder struct{}
 
 // NewLogsDecoder returns a LogsDecoder that decodes logs from a CloudWatch logs event.
-// It implements the decoder contract and process all data at once. Hence, the offset is always 0.
+// It implements the decoder contract and process all data at once. Offset is full length of data in bytes.
 // Decoding adds event message as log record body and adds resource attributes for owner, log group and log stream.
-func (*DefaultCWLogsDecoder) NewLogsDecoder(reader io.Reader, _ ...encoding.DecoderOption) (encoding.LogsDecoder, error) {
+func (*DefaultCWLogsDecoder) NewLogsDecoder(reader io.Reader, opts ...encoding.DecoderOption) (encoding.LogsDecoder, error) {
 	data, err := io.ReadAll(reader)
 	if err != nil {
 		return nil, err
+	}
+
+	options := encoding.DecoderOptions{}
+	for _, opt := range opts {
+		opt(&options)
+	}
+
+	if options.Offset > 0 {
+		return xstreamencoding.NewLogsDecoderAdapter(
+			func() (plog.Logs, error) {
+				return plog.NewLogs(), io.EOF
+			},
+			func() int64 {
+				return options.Offset
+			}), nil
 	}
 
 	var cwLog events.CloudwatchLogsData

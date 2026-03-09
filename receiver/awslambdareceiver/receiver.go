@@ -24,6 +24,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/xstreamencoding"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/awslambdareceiver/internal"
 )
 
@@ -232,7 +233,7 @@ func newLogsHandler(
 	logger := set.Logger
 
 	var err error
-	var s3LogsDecoder logsDecoderFactory = &internal.DefaultS3LogsDecoder{}
+	var s3LogsDecoder encoding.LogsDecoderFactory = &internal.DefaultS3LogsDecoder{}
 	if cfg.S3.Encoding != "" {
 		logger.Info("Using configured S3 encoding for logs", zap.String("encoding", cfg.S3.Encoding))
 
@@ -253,7 +254,7 @@ func newLogsHandler(
 		return next.ConsumeLogs(ctx, logs)
 	}
 
-	var cwDecoder logsDecoderFactory = &internal.DefaultCWLogsDecoder{}
+	var cwDecoder encoding.LogsDecoderFactory = &internal.DefaultCWLogsDecoder{}
 	if cfg.CloudWatch.Encoding != "" {
 		logger.Info("Using configured CloudWatch encoding for logs", zap.String("encoding", cfg.CloudWatch.Encoding))
 
@@ -292,7 +293,7 @@ func newMetricsHandler(
 		return nil, err
 	}
 
-	var decoder metricsDecoderFactory
+	var decoder encoding.MetricsDecoderFactory
 	decoder, ok := ext.(encoding.MetricsDecoderExtension)
 	if !ok {
 		// derive a decoder wrapper if extension is of encoding.MetricsUnmarshalerExtension type
@@ -301,7 +302,7 @@ func newMetricsHandler(
 			return nil, errors.New("provided extension does not implement MetricsDecoder or MetricsUnmarshalerExtension interfaces")
 		}
 
-		decoder = internal.NewMetricsDecoder(metricsUnmarshaler.UnmarshalMetrics)
+		decoder = xstreamencoding.NewMetricsUnmarshalerDecoderFactory(metricsUnmarshaler)
 	}
 
 	s3Service, err := s3Provider.GetService(ctx)
@@ -320,14 +321,14 @@ func newMetricsHandler(
 	return newHandlerProvider(registry), nil
 }
 
-func resolveLogsDecoder(host component.Host, encoderName string) (logsDecoderFactory, error) {
+func resolveLogsDecoder(host component.Host, encoderName string) (encoding.LogsDecoderFactory, error) {
 	var ext extension.Extension
 	ext, err := loadEncodingExtension[extension.Extension](host, encoderName, "logs")
 	if err != nil {
 		return nil, err
 	}
 
-	var decoderFactory logsDecoderFactory
+	var decoderFactory encoding.LogsDecoderFactory
 	var ok bool
 	decoderFactory, ok = ext.(encoding.LogsDecoderExtension)
 	if !ok {
@@ -337,7 +338,7 @@ func resolveLogsDecoder(host component.Host, encoderName string) (logsDecoderFac
 			return nil, errors.New("provided extension does not implement LogsDecoder or LogsUnmarshalerExtension interfaces")
 		}
 
-		decoderFactory = internal.NewLogsDecoder(logsUnmarshaler.UnmarshalLogs)
+		decoderFactory = xstreamencoding.NewLogsUnmarshalerDecoderFactory(logsUnmarshaler)
 	}
 
 	return decoderFactory, nil

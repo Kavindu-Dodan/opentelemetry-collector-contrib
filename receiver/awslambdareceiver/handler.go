@@ -47,14 +47,6 @@ type handlerProvider interface {
 	getHandler(eventType eventType) (lambdaEventHandler, error)
 }
 
-type logsDecoderFactory interface {
-	NewLogsDecoder(reader io.Reader, options ...encoding.DecoderOption) (encoding.LogsDecoder, error)
-}
-
-type metricsDecoderFactory interface {
-	NewMetricsDecoder(reader io.Reader, options ...encoding.DecoderOption) (encoding.MetricsDecoder, error)
-}
-
 // handlerProvider is responsible for providing event handlers based on event types.
 // It operates with a registry of handlers and caches loadedHandlers for reuse.
 type handlerProviderImpl struct {
@@ -94,36 +86,87 @@ type s3Handler[T emits] struct {
 	s3Service internal.S3Service
 	logger    *zap.Logger
 
-	logsDecoder    logsDecoderFactory
-	metricsDecoder metricsDecoderFactory
-	consumer       s3EventConsumerFunc[T]
+	decodeF func(ctx context.Context, reader io.Reader, event events.S3EventRecord) error
 }
 
 func newS3LogsHandler[T emits](
 	service internal.S3Service,
 	baseLogger *zap.Logger,
-	logsDecoder logsDecoderFactory,
+	logsDecoder encoding.LogsDecoderFactory,
 	consumer s3EventConsumerFunc[T],
 ) *s3Handler[T] {
+	logDecodeF := func(ctx context.Context, reader io.Reader, event events.S3EventRecord) error {
+		var decoder encoding.LogsDecoder
+		// Bytes based batching and disable flush on items
+		decoder, err := logsDecoder.NewLogsDecoder(reader, encoding.WithFlushBytes(s3StreamBatchSize), encoding.WithFlushItems(0))
+		if err != nil {
+			return fmt.Errorf("failed to derive the extension for S3 logs: %w", err)
+		}
+
+		for {
+			var logs plog.Logs
+			logs, err = decoder.DecodeLogs()
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					break
+				}
+
+				return fmt.Errorf("failed to decode S3 logs: %w", err)
+			}
+
+			enrichS3Logs(logs, event)
+			if err = consumer(ctx, event, any(logs).(T)); err != nil {
+				return checkConsumerErrorAndWrap(err)
+			}
+		}
+
+		return nil
+	}
+
 	return &s3Handler[T]{
-		s3Service:   service,
-		logger:      baseLogger.Named("s3"),
-		logsDecoder: logsDecoder,
-		consumer:    consumer,
+		s3Service: service,
+		logger:    baseLogger.Named("s3"),
+		decodeF:   logDecodeF,
 	}
 }
 
 func newS3MetricsHandler[T emits](
 	service internal.S3Service,
 	baseLogger *zap.Logger,
-	metricsDecoder metricsDecoderFactory,
+	metricsDecoder encoding.MetricsDecoderFactory,
 	consumer s3EventConsumerFunc[T],
 ) *s3Handler[T] {
+	metricDecodeF := func(ctx context.Context, reader io.Reader, event events.S3EventRecord) error {
+		var decoder encoding.MetricsDecoder
+		// Bytes based batching and disable flush on items
+		decoder, err := metricsDecoder.NewMetricsDecoder(reader, encoding.WithFlushBytes(s3StreamBatchSize), encoding.WithFlushItems(0))
+		if err != nil {
+			return fmt.Errorf("failed to derive the extension for S3 metrics: %w", err)
+		}
+
+		for {
+			var metrics pmetric.Metrics
+			metrics, err = decoder.DecodeMetrics()
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					break
+				}
+
+				return fmt.Errorf("failed to decode S3 metrics: %w", err)
+			}
+
+			if err := consumer(ctx, event, any(metrics).(T)); err != nil {
+				return checkConsumerErrorAndWrap(err)
+			}
+		}
+
+		return nil
+	}
+
 	return &s3Handler[T]{
-		s3Service:      service,
-		logger:         baseLogger.Named("s3"),
-		metricsDecoder: metricsDecoder,
-		consumer:       consumer,
+		s3Service: service,
+		logger:    baseLogger.Named("s3"),
+		decodeF:   metricDecodeF,
 	}
 }
 
@@ -165,55 +208,9 @@ func (s *s3Handler[T]) handle(ctx context.Context, event json.RawMessage) error 
 		}
 	}()
 
-	var data T
-	switch any(data).(type) {
-	case plog.Logs:
-		var logsDecoder encoding.LogsDecoder
-		// Bytes based batching and disable flush on items
-		logsDecoder, err = s.logsDecoder.NewLogsDecoder(wrappedReader, encoding.WithFlushBytes(s3StreamBatchSize), encoding.WithFlushItems(0))
-		if err != nil {
-			return fmt.Errorf("failed to derive the extension for S3 logs: %w", err)
-		}
-
-		for {
-			var logs plog.Logs
-			logs, err = logsDecoder.DecodeLogs()
-			if err != nil {
-				if errors.Is(err, io.EOF) {
-					break
-				}
-
-				return fmt.Errorf("failed to decode S3 logs: %w", err)
-			}
-
-			enrichS3Logs(logs, parsedEvent)
-			if err = s.consumer(ctx, parsedEvent, any(logs).(T)); err != nil {
-				return checkConsumerErrorAndWrap(err)
-			}
-		}
-	case pmetric.Metrics:
-		var metricsDecoder encoding.MetricsDecoder
-		// Bytes based batching and disable flush on items
-		metricsDecoder, err = s.metricsDecoder.NewMetricsDecoder(wrappedReader, encoding.WithFlushBytes(s3StreamBatchSize), encoding.WithFlushItems(0))
-		if err != nil {
-			return fmt.Errorf("failed to derive the extension for S3 metrics: %w", err)
-		}
-
-		for {
-			var metrics pmetric.Metrics
-			metrics, err = metricsDecoder.DecodeMetrics()
-			if err != nil {
-				if errors.Is(err, io.EOF) {
-					break
-				}
-
-				return fmt.Errorf("failed to decode S3 metrics: %w", err)
-			}
-
-			if err := s.consumer(ctx, parsedEvent, any(metrics).(T)); err != nil {
-				return checkConsumerErrorAndWrap(err)
-			}
-		}
+	err = s.decodeF(ctx, wrappedReader, parsedEvent)
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -235,12 +232,12 @@ func (*s3Handler[T]) parseEvent(raw json.RawMessage) (event events.S3EventRecord
 
 // cwLogsSubscriptionHandler is specialized in CloudWatch log stream subscription filter events
 type cwLogsSubscriptionHandler struct {
-	logsDecoder logsDecoderFactory
+	logsDecoder encoding.LogsDecoderFactory
 	consumer    func(context.Context, plog.Logs) error
 }
 
 func newCWLogsSubscriptionHandler(
-	logsDecoder logsDecoderFactory,
+	logsDecoder encoding.LogsDecoderFactory,
 	consumer func(context.Context, plog.Logs) error,
 ) *cwLogsSubscriptionHandler {
 	return &cwLogsSubscriptionHandler{

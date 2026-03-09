@@ -48,7 +48,7 @@ func TestProcessLambdaEvent_S3LogNotification(t *testing.T) {
 		name          string
 		s3Event       events.S3Event
 		s3MockContent s3Content
-		extension     logsDecoderFactory
+		extension     encoding.LogsDecoderFactory
 		eventConsumer consumer.Logs
 		expectedErr   string
 	}{
@@ -347,7 +347,7 @@ func TestHandleCloudwatchLogEvent(t *testing.T) {
 	tests := []struct {
 		name          string
 		eventData     string
-		extension     logsDecoderFactory
+		extension     encoding.LogsDecoderFactory
 		eventConsumer consumer.Logs
 		expectedErr   string
 	}{

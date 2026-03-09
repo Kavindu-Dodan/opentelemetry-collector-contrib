@@ -86,8 +86,7 @@ Consider following notes on default behaviors:
 
 > [!NOTE]
 > The receiver supports end to end streaming utilizing encoding extension streaming capabilities.
-> For extensions that does not support streaming, the receiver will attempt to wrap the extension with streaming support.
-> However, this may not match extension requirements such as expecting full payload for decoding.
+> For extensions that does not support streaming, xstreamencoding wrapper will be used where full payload get processed at once.
 
 Given below are example configurations for various use cases.
 
