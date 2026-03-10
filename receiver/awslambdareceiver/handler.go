@@ -82,19 +82,19 @@ type lambdaEventHandler interface {
 }
 
 // s3Handler is specialized in S3 object event handling
-type s3Handler[T emits] struct {
+type s3Handler struct {
 	s3Service internal.S3Service
 	logger    *zap.Logger
 
 	decodeF func(ctx context.Context, reader io.Reader, event events.S3EventRecord) error
 }
 
-func newS3LogsHandler[T emits](
+func newS3LogsHandler(
 	service internal.S3Service,
 	baseLogger *zap.Logger,
 	logsDecoder encoding.LogsDecoderFactory,
-	consumer s3EventConsumerFunc[T],
-) *s3Handler[T] {
+	consumer s3EventConsumerFunc[plog.Logs],
+) *s3Handler {
 	logDecodeF := func(ctx context.Context, reader io.Reader, event events.S3EventRecord) error {
 		var decoder encoding.LogsDecoder
 		// Bytes based batching and disable flush on items
@@ -115,7 +115,7 @@ func newS3LogsHandler[T emits](
 			}
 
 			enrichS3Logs(logs, event)
-			if err = consumer(ctx, event, any(logs).(T)); err != nil {
+			if err = consumer(ctx, event, logs); err != nil {
 				return checkConsumerErrorAndWrap(err)
 			}
 		}
@@ -123,19 +123,19 @@ func newS3LogsHandler[T emits](
 		return nil
 	}
 
-	return &s3Handler[T]{
+	return &s3Handler{
 		s3Service: service,
 		logger:    baseLogger.Named("s3"),
 		decodeF:   logDecodeF,
 	}
 }
 
-func newS3MetricsHandler[T emits](
+func newS3MetricsHandler(
 	service internal.S3Service,
 	baseLogger *zap.Logger,
 	metricsDecoder encoding.MetricsDecoderFactory,
-	consumer s3EventConsumerFunc[T],
-) *s3Handler[T] {
+	consumer s3EventConsumerFunc[pmetric.Metrics],
+) *s3Handler {
 	metricDecodeF := func(ctx context.Context, reader io.Reader, event events.S3EventRecord) error {
 		var decoder encoding.MetricsDecoder
 		// Bytes based batching and disable flush on items
@@ -155,7 +155,7 @@ func newS3MetricsHandler[T emits](
 				return fmt.Errorf("failed to decode S3 metrics: %w", err)
 			}
 
-			if err := consumer(ctx, event, any(metrics).(T)); err != nil {
+			if err := consumer(ctx, event, metrics); err != nil {
 				return checkConsumerErrorAndWrap(err)
 			}
 		}
@@ -163,18 +163,18 @@ func newS3MetricsHandler[T emits](
 		return nil
 	}
 
-	return &s3Handler[T]{
+	return &s3Handler{
 		s3Service: service,
 		logger:    baseLogger.Named("s3"),
 		decodeF:   metricDecodeF,
 	}
 }
 
-func (*s3Handler[T]) handlerType() eventType {
+func (*s3Handler) handlerType() eventType {
 	return s3Event
 }
 
-func (s *s3Handler[T]) handle(ctx context.Context, event json.RawMessage) error {
+func (s *s3Handler) handle(ctx context.Context, event json.RawMessage) error {
 	var err error
 	parsedEvent, err := s.parseEvent(event)
 	if err != nil {
@@ -216,7 +216,7 @@ func (s *s3Handler[T]) handle(ctx context.Context, event json.RawMessage) error 
 	return nil
 }
 
-func (*s3Handler[T]) parseEvent(raw json.RawMessage) (event events.S3EventRecord, err error) {
+func (*s3Handler) parseEvent(raw json.RawMessage) (event events.S3EventRecord, err error) {
 	var message events.S3Event
 	if err := gojson.Unmarshal(raw, &message); err != nil {
 		return events.S3EventRecord{}, fmt.Errorf("failed to unmarshal S3 event notification: %w", err)

@@ -125,7 +125,7 @@ func TestProcessLambdaEvent_S3LogNotification(t *testing.T) {
 				objectKey:  "test-file.txt",
 				data:       []byte("Some log in S3 object"),
 			},
-			extension:     &internal.DefaultS3LogsDecoder{},
+			extension:     internal.NewDefaultS3LogsDecoder(),
 			eventConsumer: &logConsumerWithGoldenValidation{logsExpectedPath: filepath.Join(testDataDirectory, "s3_log_expected_string.yaml")},
 		},
 		{
@@ -149,9 +149,9 @@ func TestProcessLambdaEvent_S3LogNotification(t *testing.T) {
 			s3MockContent: s3Content{
 				bucketName: "test-bucket",
 				objectKey:  "test-file.txt",
-				data:       []byte("H4sIAAAAAAAAAwvOz01VyMlPV8jMUwg2VshPykpNLgEAo01BGxUAAAA="),
+				data:       compressData(t, []byte("Logs in Gzip S3 object")),
 			},
-			extension:     &internal.DefaultS3LogsDecoder{},
+			extension:     internal.NewDefaultS3LogsDecoder(),
 			eventConsumer: &logConsumerWithGoldenValidation{logsExpectedPath: filepath.Join(testDataDirectory, "s3_log_expected_gzip.yaml")},
 		},
 		{

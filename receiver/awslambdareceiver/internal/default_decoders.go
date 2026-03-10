@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"time"
-	"unicode/utf8"
 
 	"github.com/aws/aws-lambda-go/events"
 	gojson "github.com/goccy/go-json"
@@ -20,64 +19,25 @@ import (
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/awslambdareceiver/internal/metadata"
 )
 
-// DefaultS3LogsDecoder defines the default S3 logs decoder for AWS Lambda receiver
-type DefaultS3LogsDecoder struct{}
+// NewDefaultS3LogsDecoder returns a defaultS3Unmarshaler wrapped as an encoding.LogsDecoderFactory.
+func NewDefaultS3LogsDecoder() encoding.LogsDecoderFactory {
+	return xstreamencoding.NewLogsUnmarshalerDecoderFactory(&defaultS3Unmarshaler{})
+}
 
-// NewLogsDecoder returns a LogsDecoder that decodes logs from a S3 object containing logs.
-// It implements the decoder contract and process all data at once. Offset is full length of data in bytes.
-// Decoding adds event message as log record body and adds resource attributes for owner, log group and log stream.
-func (*DefaultS3LogsDecoder) NewLogsDecoder(reader io.Reader, opts ...encoding.DecoderOption) (encoding.LogsDecoder, error) {
-	options := encoding.DecoderOptions{}
-	for _, opt := range opts {
-		opt(&options)
-	}
+// defaultS3Unmarshaler defines the default S3 logs decoder for AWS Lambda receiver.
+type defaultS3Unmarshaler struct{}
 
-	if options.Offset > 0 {
-		// consume all and send an EOF
-		_, err := io.Copy(io.Discard, reader)
-		if err != nil {
-			return nil, fmt.Errorf("failed to consume reader data: %w", err)
-		}
-		return xstreamencoding.NewLogsDecoderAdapter(
-			func() (plog.Logs, error) {
-				return plog.NewLogs(), io.EOF
-			},
-			func() int64 {
-				return options.Offset
-			}), nil
-	}
-
+// UnmarshalLogs defines the built-in behavior for S3 events when no encoding extension is provided.
+func (*defaultS3Unmarshaler) UnmarshalLogs(data []byte) (plog.Logs, error) {
 	logs := plog.NewLogs()
 	rl := logs.ResourceLogs().AppendEmpty()
 	sl := rl.ScopeLogs().AppendEmpty()
 	sl.Scope().SetName(metadata.ScopeName)
 
-	data, err := io.ReadAll(reader)
-	if err != nil {
-		return nil, err
-	}
-
 	lr := sl.LogRecords().AppendEmpty()
-	if utf8.Valid(data) {
-		lr.Body().SetStr(string(data))
-	} else {
-		lr.Body().SetEmptyBytes().FromRaw(data)
-	}
+	lr.Body().SetStr(string(data))
 
-	isEOF := false
-	return xstreamencoding.NewLogsDecoderAdapter(
-			func() (plog.Logs, error) {
-				if isEOF {
-					return plog.NewLogs(), io.EOF
-				}
-
-				isEOF = true
-				return logs, nil
-			},
-			func() int64 {
-				return int64(len(data))
-			}),
-		nil
+	return logs, nil
 }
 
 // DefaultCWLogsDecoder defines the default CloudWatch logs decoder for AWS Lambda receiver.

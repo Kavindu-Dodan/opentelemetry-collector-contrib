@@ -233,7 +233,7 @@ func newLogsHandler(
 	logger := set.Logger
 
 	var err error
-	var s3LogsDecoder encoding.LogsDecoderFactory = &internal.DefaultS3LogsDecoder{}
+	s3LogsDecoder := internal.NewDefaultS3LogsDecoder()
 	if cfg.S3.Encoding != "" {
 		logger.Info("Using configured S3 encoding for logs", zap.String("encoding", cfg.S3.Encoding))
 

@@ -5,7 +5,6 @@ package internal
 
 import (
 	"bytes"
-	"compress/gzip"
 	"io"
 	"path/filepath"
 	"testing"
@@ -31,24 +30,13 @@ func TestDefaultS3LogsDecoder_NewLogsDecoder(t *testing.T) {
 			},
 			expectedPath: filepath.Join("testdata", "default_s3_decoder_expected.yaml"),
 		},
-		{
-			name: "gzipped input",
-			input: func() io.Reader {
-				var buf bytes.Buffer
-				gzipWriter := gzip.NewWriter(&buf)
-				_, _ = gzipWriter.Write([]byte("some text"))
-				_ = gzipWriter.Close()
-				return bytes.NewReader(buf.Bytes())
-			},
-			expectedPath: filepath.Join("testdata", "default_s3_decoder_expected_gzip.yaml"),
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			decoder := &DefaultS3LogsDecoder{}
+			decoder := NewDefaultS3LogsDecoder()
 			logsDecoder, err := decoder.NewLogsDecoder(tt.input())
 			require.NoError(t, err)
 			require.NotNil(t, logsDecoder)
