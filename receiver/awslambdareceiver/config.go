@@ -10,11 +10,18 @@ import (
 	"go.opentelemetry.io/collector/component"
 )
 
-const s3ARNPrefix = "arn:aws:s3:::"
+type metadataTarget string
+
+const (
+	attributes metadataTarget = "attributes"
+	body       metadataTarget = "body"
+
+	s3ARNPrefix = "arn:aws:s3:::"
+)
 
 type Config struct {
 	// S3 defines configuration options for S3 Lambda trigger.
-	S3 sharedConfig `mapstructure:"s3"`
+	S3 s3Config `mapstructure:"s3"`
 
 	// CloudWatch defines configuration options for CloudWatch Lambda trigger.
 	CloudWatch sharedConfig `mapstructure:"cloudwatch"`
@@ -23,6 +30,15 @@ type Config struct {
 	FailureBucketARN string `mapstructure:"failure_bucket_arn"`
 
 	_ struct{} // Prevent unkeyed literal initialization
+}
+
+type s3Config struct {
+	// MetadataTarget defines where to place S3 event metadata. Supported values: "attributes" (default), "body".
+	// When set to "body", metadata is added to the log record body only if the body is already a map.
+	// If the body is not a map, body enrichment is skipped for that log record.
+	MetadataTarget metadataTarget `mapstructure:"metadata_target"`
+
+	sharedConfig `mapstructure:",squash"`
 }
 
 // sharedConfig defines configuration options shared between different AWS Lambda trigger types.
@@ -39,7 +55,11 @@ type sharedConfig struct {
 var _ component.Config = (*Config)(nil)
 
 func createDefaultConfig() component.Config {
-	return &Config{}
+	return &Config{
+		S3: s3Config{
+			MetadataTarget: attributes,
+		},
+	}
 }
 
 func (c *Config) Validate() error {
@@ -48,6 +68,10 @@ func (c *Config) Validate() error {
 		if err != nil {
 			return fmt.Errorf("invalid failure_bucket_arn: %w", err)
 		}
+	}
+
+	if c.S3.MetadataTarget != attributes && c.S3.MetadataTarget != body {
+		return fmt.Errorf("invalid s3.metadata_target: %s, supported values are 'attributes' (default) and 'body'", c.S3.MetadataTarget)
 	}
 
 	return nil

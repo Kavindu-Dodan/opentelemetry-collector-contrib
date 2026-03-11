@@ -72,10 +72,18 @@ CloudWatch Logs events are handled in the following manner:
 
 The following receiver configuration parameters are supported.
 
-| Name                   | Description                                             |
-|:-----------------------|:--------------------------------------------------------|
-| `s3::encoding`         | Optional encoder to use for S3 event processing         | 
-| `cloudwatch::encoding` | Optional encoder to use for CloudWatch event processing | 
+| Name                   | Description                                                                      |
+|:-----------------------|:---------------------------------------------------------------------------------|
+| `s3::encoding`         | Optional encoder to use for S3 event processing                                  | 
+| `s3::metadata_target`  | Where to place S3 event metadata (`attributes` or `body`). Default: `attributes` |
+| `cloudwatch::encoding` | Optional encoder to use for CloudWatch event processing                          |
+| `failure_bucket_arn`   | ARN of the S3 bucket used as Lambda failure destination for error replaying      |
+
+When processing S3 events, the receiver enriches log records with S3 event metadata (e.g., bucket name, object key).
+The `s3::metadata_target` option controls where this metadata is placed:
+
+- `attributes` (default): Metadata is added as log record attributes.
+- `body`: Metadata is added to the log record body. This only works when the body is already a map. Otherwise, metadata addition will be skipped.
 
 Consider following notes on default behaviors:
 

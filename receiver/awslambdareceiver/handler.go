@@ -114,7 +114,6 @@ func newS3LogsHandler(
 				return fmt.Errorf("failed to decode S3 logs: %w", err)
 			}
 
-			enrichS3Logs(logs, event)
 			if err = consumer(ctx, event, logs); err != nil {
 				return checkConsumerErrorAndWrap(err)
 			}
@@ -310,17 +309,30 @@ func gunzipIfNeeded(r io.Reader) (io.Reader, error) {
 	return buf, nil
 }
 
-func enrichS3Logs(logs plog.Logs, event events.S3EventRecord) {
+func enrichS3Logs(target metadataTarget, logs plog.Logs, event events.S3EventRecord) {
 	for _, resourceLogs := range logs.ResourceLogs().All() {
-		resourceAttrs := resourceLogs.Resource().Attributes()
-		resourceAttrs.PutStr(string(conventions.CloudProviderKey), conventions.CloudProviderAWS.Value.AsString())
-		resourceAttrs.PutStr(string(conventions.CloudRegionKey), event.AWSRegion)
-		resourceAttrs.PutStr(string(conventions.AWSS3BucketKey), event.S3.Bucket.Name)
-		resourceAttrs.PutStr(string(conventions.AWSS3KeyKey), event.S3.Object.Key)
+		if target == attributes {
+			attrs := resourceLogs.Resource().Attributes()
+			attrs.PutStr(string(conventions.CloudProviderKey), conventions.CloudProviderAWS.Value.AsString())
+			attrs.PutStr(string(conventions.CloudRegionKey), event.AWSRegion)
+			attrs.PutStr(string(conventions.AWSS3KeyKey), event.S3.Object.Key)
+			attrs.PutStr("aws.s3.bucket.name", event.S3.Bucket.Name)
+			attrs.PutStr("aws.s3.bucket.arn", event.S3.Bucket.Arn)
+		}
 
 		for _, scopeLogs := range resourceLogs.ScopeLogs().All() {
 			for _, logRecord := range scopeLogs.LogRecords().All() {
 				logRecord.SetObservedTimestamp(pcommon.NewTimestampFromTime(event.EventTime))
+
+				// Write metadata to body if requested through configuration & body is a map
+				if target == body && logRecord.Body().Type() == pcommon.ValueTypeMap {
+					bodyMap := logRecord.Body().Map()
+					bodyMap.PutStr(string(conventions.CloudProviderKey), conventions.CloudProviderAWS.Value.AsString())
+					bodyMap.PutStr(string(conventions.CloudRegionKey), event.AWSRegion)
+					bodyMap.PutStr(string(conventions.AWSS3KeyKey), event.S3.Object.Key)
+					bodyMap.PutStr("aws.s3.bucket.name", event.S3.Bucket.Name)
+					bodyMap.PutStr("aws.s3.bucket.arn", event.S3.Bucket.Arn)
+				}
 			}
 		}
 	}

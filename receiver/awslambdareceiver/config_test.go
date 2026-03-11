@@ -31,8 +31,11 @@ func TestLoadConfig(t *testing.T) {
 			name:              "Config with both S3 and CloudWatch encoding",
 			componentIDToLoad: component.NewIDWithName(metadata.Type, "aws_logs_encoding"),
 			expected: &Config{
-				S3: sharedConfig{
-					Encoding: "aws_logs_encoding",
+				S3: s3Config{
+					MetadataTarget: attributes,
+					sharedConfig: sharedConfig{
+						Encoding: "aws_logs_encoding",
+					},
 				},
 				CloudWatch: sharedConfig{
 					Encoding: "aws_logs_encoding",
@@ -43,8 +46,11 @@ func TestLoadConfig(t *testing.T) {
 			name:              "Config with both S3 config only",
 			componentIDToLoad: component.NewIDWithName(metadata.Type, "json_log_encoding"),
 			expected: &Config{
-				S3: sharedConfig{
-					Encoding: "json_log_encoding",
+				S3: s3Config{
+					MetadataTarget: attributes,
+					sharedConfig: sharedConfig{
+						Encoding: "json_log_encoding",
+					},
 				},
 				CloudWatch: sharedConfig{},
 			},
@@ -53,7 +59,9 @@ func TestLoadConfig(t *testing.T) {
 			name:              "Config with empty encoding",
 			componentIDToLoad: component.NewIDWithName(metadata.Type, "empty_encoding"),
 			expected: &Config{
-				S3:         sharedConfig{},
+				S3: s3Config{
+					MetadataTarget: attributes,
+				},
 				CloudWatch: sharedConfig{},
 			},
 		},
@@ -61,7 +69,9 @@ func TestLoadConfig(t *testing.T) {
 			name:              "Config with failure bucket ARN",
 			componentIDToLoad: component.NewIDWithName(metadata.Type, "with_failure_arn"),
 			expected: &Config{
-				S3:               sharedConfig{},
+				S3: s3Config{
+					MetadataTarget: attributes,
+				},
 				CloudWatch:       sharedConfig{},
 				FailureBucketARN: "arn:aws:s3:::example",
 			},

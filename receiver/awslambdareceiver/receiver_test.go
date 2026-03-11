@@ -181,8 +181,10 @@ func TestStartRequiresLambdaEnvironment(t *testing.T) {
 
 func TestProcessLambdaEvent(t *testing.T) {
 	commonCfg := Config{
-		S3: sharedConfig{
-			Encoding: "awslogs",
+		S3: s3Config{
+			sharedConfig: sharedConfig{
+				Encoding: "awslogs",
+			},
 		},
 	}
 

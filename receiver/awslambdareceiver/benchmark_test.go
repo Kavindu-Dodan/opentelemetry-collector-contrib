@@ -41,7 +41,7 @@ func BenchmarkHandleS3Notification(b *testing.B) {
 	consumer := noOpLogsConsumer{}
 	// Wrap the consumer to match the new s3EventConsumerFunc signature
 	logsConsumer := func(ctx context.Context, event events.S3EventRecord, logs plog.Logs) error {
-		enrichS3Logs(logs, event)
+		enrichS3Logs(attributes, logs, event)
 		return consumer.ConsumeLogs(ctx, logs)
 	}
 	handler := newS3LogsHandler(service, zap.NewNop(), &customLogUnmarshaler{}, logsConsumer)
