@@ -354,7 +354,7 @@ func TestHandleCloudwatchLogEvent(t *testing.T) {
 		{
 			name:          "Valid CloudWatch log event with built-in unmarshaler and golden validation consumer",
 			eventData:     loadCompressedData(t, filepath.Join(testDataDirectory, "cloudwatch_log.json")),
-			extension:     &internal.DefaultCWLogsDecoder{},
+			extension:     internal.NewDefaultCWLogsDecoder(),
 			eventConsumer: &logConsumerWithGoldenValidation{logsExpectedPath: filepath.Join(testDataDirectory, "cloudwatch_log_expected_default.yaml")},
 		},
 		{
@@ -366,14 +366,14 @@ func TestHandleCloudwatchLogEvent(t *testing.T) {
 		{
 			name:          "Invalid CloudWatch log event - invalid base64 data",
 			eventData:     "#",
-			extension:     &internal.DefaultCWLogsDecoder{},
+			extension:     internal.NewDefaultCWLogsDecoder(),
 			expectedErr:   "failed to decode data from cloudwatch logs event",
 			eventConsumer: &noOpLogsConsumer{},
 		},
 		{
 			name:          "Invalid CloudWatch log event - invalid json data",
 			eventData:     "test",
-			extension:     &internal.DefaultCWLogsDecoder{},
+			extension:     internal.NewDefaultCWLogsDecoder(),
 			expectedErr:   "failed to decompress data from cloudwatch subscription event",
 			eventConsumer: &noOpLogsConsumer{},
 		},

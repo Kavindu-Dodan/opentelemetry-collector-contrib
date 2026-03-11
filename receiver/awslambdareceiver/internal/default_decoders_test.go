@@ -81,7 +81,7 @@ func TestDefaultCWLogsDecoder_NewLogsDecoder(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			decoder := &DefaultCWLogsDecoder{}
+			decoder := NewDefaultCWLogsDecoder()
 			logsDecoder, err := decoder.NewLogsDecoder(tt.input())
 			require.NoError(t, err)
 			require.NotNil(t, logsDecoder)

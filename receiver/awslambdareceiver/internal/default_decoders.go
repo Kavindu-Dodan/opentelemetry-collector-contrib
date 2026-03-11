@@ -5,7 +5,6 @@ package internal // import "github.com/open-telemetry/opentelemetry-collector-co
 
 import (
 	"fmt"
-	"io"
 	"time"
 
 	"github.com/aws/aws-lambda-go/events"
@@ -40,37 +39,20 @@ func (*defaultS3Unmarshaler) UnmarshalLogs(data []byte) (plog.Logs, error) {
 	return logs, nil
 }
 
-// DefaultCWLogsDecoder defines the default CloudWatch logs decoder for AWS Lambda receiver.
-type DefaultCWLogsDecoder struct{}
+// NewDefaultCWLogsDecoder returns a defaultCWLogsDecoder wrapped as an encoding.LogsDecoderFactory.
+func NewDefaultCWLogsDecoder() encoding.LogsDecoderFactory {
+	return xstreamencoding.NewLogsUnmarshalerDecoderFactory(&defaultCWLogsDecoder{})
+}
 
-// NewLogsDecoder returns a LogsDecoder that decodes logs from a CloudWatch logs event.
-// It implements the decoder contract and process all data at once. Offset is full length of data in bytes.
-// Decoding adds event message as log record body and adds resource attributes for owner, log group and log stream.
-func (*DefaultCWLogsDecoder) NewLogsDecoder(reader io.Reader, opts ...encoding.DecoderOption) (encoding.LogsDecoder, error) {
-	data, err := io.ReadAll(reader)
-	if err != nil {
-		return nil, err
-	}
+// defaultCWLogsDecoder defines the default CloudWatch logs decoder for AWS Lambda receiver.
+type defaultCWLogsDecoder struct{}
 
-	options := encoding.DecoderOptions{}
-	for _, opt := range opts {
-		opt(&options)
-	}
-
-	if options.Offset > 0 {
-		return xstreamencoding.NewLogsDecoderAdapter(
-			func() (plog.Logs, error) {
-				return plog.NewLogs(), io.EOF
-			},
-			func() int64 {
-				return options.Offset
-			}), nil
-	}
-
+// UnmarshalLogs defines the built-in behavior for CloudWatch logs events when no encoding extension is provided.
+func (*defaultCWLogsDecoder) UnmarshalLogs(data []byte) (plog.Logs, error) {
 	var cwLog events.CloudwatchLogsData
-	err = gojson.Unmarshal(data, &cwLog)
+	err := gojson.Unmarshal(data, &cwLog)
 	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal data from cloudwatch logs event: %w", err)
+		return plog.NewLogs(), fmt.Errorf("failed to unmarshal data from cloudwatch logs event: %w", err)
 	}
 
 	logs := plog.NewLogs()
@@ -92,18 +74,5 @@ func (*DefaultCWLogsDecoder) NewLogsDecoder(reader io.Reader, opts ...encoding.D
 		logRecord.Body().SetStr(event.Message)
 	}
 
-	isEOF := false
-	return xstreamencoding.NewLogsDecoderAdapter(
-			func() (plog.Logs, error) {
-				if isEOF {
-					return plog.NewLogs(), io.EOF
-				}
-
-				isEOF = true
-				return logs, nil
-			},
-			func() int64 {
-				return int64(len(data))
-			}),
-		nil
+	return logs, nil
 }

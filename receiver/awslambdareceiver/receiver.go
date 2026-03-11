@@ -254,7 +254,7 @@ func newLogsHandler(
 		return next.ConsumeLogs(ctx, logs)
 	}
 
-	var cwDecoder encoding.LogsDecoderFactory = &internal.DefaultCWLogsDecoder{}
+	cwDecoder := internal.NewDefaultCWLogsDecoder()
 	if cfg.CloudWatch.Encoding != "" {
 		logger.Info("Using configured CloudWatch encoding for logs", zap.String("encoding", cfg.CloudWatch.Encoding))
 
