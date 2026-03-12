@@ -8,6 +8,11 @@ awslambda/json_log_encoding:
   s3:
     encoding: json_log_encoding
 
+awslambda/with_attribute_target:
+  s3:
+    encoding: encoding
+    metadata_target: body
+
 awslambda/empty_encoding:
 
 awslambda/with_failure_arn:

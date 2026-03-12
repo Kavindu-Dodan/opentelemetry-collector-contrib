@@ -405,136 +405,118 @@ func TestHandleCloudwatchLogEvent(t *testing.T) {
 func TestEnrichS3Logs(t *testing.T) {
 	t.Parallel()
 
-	t.Run("Enrich S3 logs with event metadata in attributes", func(t *testing.T) {
-		// given
-		logs := plog.NewLogs()
+	observedTimestamp := time.UnixMilli(1765574662915)
+	expectedTimestamp := pcommon.NewTimestampFromTime(observedTimestamp)
 
-		rl := logs.ResourceLogs().AppendEmpty()
-		sl := rl.ScopeLogs()
-		lr := sl.AppendEmpty().LogRecords()
-		lr.AppendEmpty()
-
-		observedTimestamp := time.UnixMilli(1765574662915)
-		expectedTimestamp := pcommon.NewTimestampFromTime(observedTimestamp)
-
-		s3Record := events.S3EventRecord{
-			AWSRegion: "us-east-1",
-			EventTime: observedTimestamp,
-			S3: events.S3Entity{
-				SchemaVersion: "",
-				Bucket: events.S3Bucket{
-					Name: "bucket-name",
-					Arn:  "arn:aws:s3:::bucket-name",
-				},
-				Object: events.S3Object{
-					Key: "object-key",
-				},
+	s3Record := events.S3EventRecord{
+		AWSRegion: "us-east-1",
+		EventTime: observedTimestamp,
+		S3: events.S3Entity{
+			Bucket: events.S3Bucket{
+				Name: "bucket-name",
+				Arn:  "arn:aws:s3:::bucket-name",
 			},
-		}
+			Object: events.S3Object{
+				Key: "object-key",
+			},
+		},
+	}
 
-		// when
-		enrichS3Logs(attributes, logs, s3Record)
+	expectedMetadata := map[string]string{
+		"cloud.provider":     "aws",
+		"cloud.region":       "us-east-1",
+		"aws.s3.bucket.name": "bucket-name",
+		"aws.s3.bucket.arn":  "arn:aws:s3:::bucket-name",
+		"aws.s3.key":         "object-key",
+	}
 
-		// then
-		for _, resource := range logs.ResourceLogs().All() {
-			resourceAttrs := resource.Resource().Attributes()
+	tests := []struct {
+		name                string
+		target              metadataTarget
+		bodyIsMap           bool
+		expectResourceAttrs bool
+		expectBodyAttrs     bool
+	}{
+		{
+			name:                "Enrich S3 logs with event metadata in attributes",
+			target:              attributes,
+			bodyIsMap:           false,
+			expectResourceAttrs: true,
+			expectBodyAttrs:     false,
+		},
+		{
+			name:                "Enrich S3 logs with event metadata in body when body is a map",
+			target:              body,
+			bodyIsMap:           true,
+			expectResourceAttrs: false,
+			expectBodyAttrs:     true,
+		},
+		{
+			name:                "Enrich S3 logs with no event metadata",
+			target:              none,
+			bodyIsMap:           true,
+			expectResourceAttrs: false,
+			expectBodyAttrs:     false,
+		},
+	}
 
-			v, b := resourceAttrs.Get("cloud.provider")
-			require.True(t, b)
-			require.Equal(t, "aws", v.AsString())
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// given
+			logs := plog.NewLogs()
+			rl := logs.ResourceLogs().AppendEmpty()
+			sl := rl.ScopeLogs().AppendEmpty()
+			lr := sl.LogRecords().AppendEmpty()
 
-			v, b = resourceAttrs.Get("cloud.region")
-			require.True(t, b)
-			require.Equal(t, "us-east-1", v.AsString())
+			if test.bodyIsMap {
+				bodyMap := lr.Body().SetEmptyMap()
+				bodyMap.PutStr("message", "Body message")
+			}
 
-			v, b = resourceAttrs.Get("aws.s3.bucket.name")
-			require.True(t, b)
-			require.Equal(t, "bucket-name", v.AsString())
+			// when
+			enrichS3Logs(test.target, logs, s3Record)
 
-			v, b = resourceAttrs.Get("aws.s3.bucket.arn")
-			require.True(t, b)
-			require.Equal(t, "arn:aws:s3:::bucket-name", v.AsString())
+			// then
+			for _, resource := range logs.ResourceLogs().All() {
+				resourceAttrs := resource.Resource().Attributes()
 
-			v, b = resourceAttrs.Get("aws.s3.key")
-			require.True(t, b)
-			require.Equal(t, "object-key", v.AsString())
+				for key, expected := range expectedMetadata {
+					v, ok := resourceAttrs.Get(key)
+					if test.expectResourceAttrs {
+						require.True(t, ok, "expected resource attribute %s", key)
+						require.Equal(t, expected, v.AsString())
+					} else {
+						require.False(t, ok, "unexpected resource attribute %s", key)
+					}
+				}
 
-			for _, scope := range resource.ScopeLogs().All() {
-				for _, logRecord := range scope.LogRecords().All() {
-					require.Equal(t, expectedTimestamp, logRecord.ObservedTimestamp())
+				for _, scope := range resource.ScopeLogs().All() {
+					for _, logRecord := range scope.LogRecords().All() {
+						require.Equal(t, expectedTimestamp, logRecord.ObservedTimestamp())
+
+						if test.bodyIsMap {
+							require.Equal(t, pcommon.ValueTypeMap, logRecord.Body().Type())
+							bMap := logRecord.Body().Map()
+
+							v, ok := bMap.Get("message")
+							require.True(t, ok)
+							require.Equal(t, "Body message", v.AsString())
+
+							for key, expected := range expectedMetadata {
+								v, ok := bMap.Get(key)
+								if test.expectBodyAttrs {
+									require.True(t, ok, "expected body attribute %s", key)
+									require.Equal(t, expected, v.AsString())
+								} else {
+									require.False(t, ok, "unexpected body attribute %s", key)
+								}
+							}
+						}
+					}
 				}
 			}
-		}
-	})
-
-	t.Run("Enrich S3 logs with event metadata in body when body is a map", func(t *testing.T) {
-		// given
-		logs := plog.NewLogs()
-
-		rl := logs.ResourceLogs().AppendEmpty()
-		sl := rl.ScopeLogs().AppendEmpty()
-		lr := sl.LogRecords().AppendEmpty()
-
-		// Set the body to a map so the body enrichment path applies
-		bodyMap := lr.Body().SetEmptyMap()
-		bodyMap.PutStr("message", "Body message")
-
-		observedTimestamp := time.UnixMilli(1765574662915)
-		expectedTimestamp := pcommon.NewTimestampFromTime(observedTimestamp)
-
-		s3Record := events.S3EventRecord{
-			AWSRegion: "us-east-1",
-			EventTime: observedTimestamp,
-			S3: events.S3Entity{
-				Bucket: events.S3Bucket{
-					Name: "bucket-name",
-					Arn:  "arn:aws:s3:::bucket-name",
-				},
-				Object: events.S3Object{
-					Key: "object-key",
-				},
-			},
-		}
-
-		// when
-		enrichS3Logs(body, logs, s3Record)
-
-		// then
-		for _, resource := range logs.ResourceLogs().All() {
-			for _, scope := range resource.ScopeLogs().All() {
-				for _, logRecord := range scope.LogRecords().All() {
-					require.Equal(t, expectedTimestamp, logRecord.ObservedTimestamp())
-					require.Equal(t, pcommon.ValueTypeMap, logRecord.Body().Type())
-
-					bMap := logRecord.Body().Map()
-
-					v, ok := bMap.Get("message")
-					require.True(t, ok)
-					require.Equal(t, "Body message", v.AsString())
-
-					v, ok = bMap.Get("cloud.provider")
-					require.True(t, ok)
-					require.Equal(t, "aws", v.AsString())
-
-					v, ok = bMap.Get("cloud.region")
-					require.True(t, ok)
-					require.Equal(t, "us-east-1", v.AsString())
-
-					v, ok = bMap.Get("aws.s3.bucket.name")
-					require.True(t, ok)
-					require.Equal(t, "bucket-name", v.AsString())
-
-					v, ok = bMap.Get("aws.s3.bucket.arn")
-					require.True(t, ok)
-					require.Equal(t, "arn:aws:s3:::bucket-name", v.AsString())
-
-					v, ok = bMap.Get("aws.s3.key")
-					require.True(t, ok)
-					require.Equal(t, "object-key", v.AsString())
-				}
-			}
-		}
-	})
+		})
+	}
 }
 
 func TestConsumerErrorHandling(t *testing.T) {

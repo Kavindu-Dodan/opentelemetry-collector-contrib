@@ -56,6 +56,19 @@ func TestLoadConfig(t *testing.T) {
 			},
 		},
 		{
+			name:              "Config with metadata target",
+			componentIDToLoad: component.NewIDWithName(metadata.Type, "with_attribute_target"),
+			expected: &Config{
+				S3: s3Config{
+					MetadataTarget: body,
+					sharedConfig: sharedConfig{
+						Encoding: "encoding",
+					},
+				},
+				CloudWatch: sharedConfig{},
+			},
+		},
+		{
 			name:              "Config with empty encoding",
 			componentIDToLoad: component.NewIDWithName(metadata.Type, "empty_encoding"),
 			expected: &Config{

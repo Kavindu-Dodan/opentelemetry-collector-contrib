@@ -15,6 +15,7 @@ type metadataTarget string
 const (
 	attributes metadataTarget = "attributes"
 	body       metadataTarget = "body"
+	none       metadataTarget = "none"
 
 	s3ARNPrefix = "arn:aws:s3:::"
 )
@@ -70,7 +71,7 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	if c.S3.MetadataTarget != attributes && c.S3.MetadataTarget != body {
+	if c.S3.MetadataTarget != attributes && c.S3.MetadataTarget != body && c.S3.MetadataTarget != none {
 		return fmt.Errorf("invalid s3.metadata_target: %s, supported values are 'attributes' (default) and 'body'", c.S3.MetadataTarget)
 	}
 

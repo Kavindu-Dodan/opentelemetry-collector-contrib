@@ -17,3 +17,6 @@ properties:
       encoding:
         description: Encoding defines the encoding to decode incoming Lambda invocation data. This extension is expected to further process content of the events that are extracted from Lambda trigger. If receiving data is in different formats(ex:- a mix of VPC flow logs, CloudTrail logs), receiver is recommended to have separate Lambda functions with specific extension configurations.
         type: string
+      metadata_target:
+        description: 'MetadataTarget defines where to place S3 event metadata. Supported values: "attributes" (default), "body". When set to "body", metadata is added to the log record body only if the body is already a map. If the body is not a map, body enrichment is skipped for that log record.'
+        type: string

@@ -84,6 +84,7 @@ The `s3::metadata_target` option controls where this metadata is placed:
 
 - `attributes` (default): Metadata is added as log record attributes.
 - `body`: Metadata is added to the log record body. This only works when the body is already a map. Otherwise, metadata addition will be skipped.
+- `none`: Metadata will not be added to the log record. Use this mode to reduce log record size when S3 metadata is not needed.
 
 Consider following notes on default behaviors:
 
