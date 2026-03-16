@@ -14,6 +14,7 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
+	"go.opentelemetry.io/collector/client"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/consumer/consumererror"
@@ -21,6 +22,7 @@ import (
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/receiver"
+	conventions "go.opentelemetry.io/otel/semconv/v1.38.0"
 	"go.uber.org/zap"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding"
@@ -250,8 +252,21 @@ func newLogsHandler(
 
 	// Wrapper function that sets observed timestamp for S3 logs
 	logsConsumer := func(ctx context.Context, event events.S3EventRecord, logs plog.Logs) error {
-		enrichS3Logs(cfg.S3.MetadataTarget, logs, event)
-		return next.ConsumeLogs(ctx, logs)
+		m := map[string][]string{}
+
+		m[string(conventions.CloudProviderKey)] = []string{conventions.CloudProviderAWS.Value.AsString()}
+		m[string(conventions.CloudRegionKey)] = []string{event.AWSRegion}
+		m[string(conventions.AWSS3KeyKey)] = []string{event.S3.Object.Key}
+		m["aws.s3.bucket.name"] = []string{event.S3.Bucket.Name}
+		m["aws.s3.bucket.arn"] = []string{event.S3.Bucket.Arn}
+		m["attrib_source"] = []string{"from_processor"}
+
+		newContext := client.NewContext(ctx, client.Info{
+			Metadata: client.NewMetadata(m),
+		})
+
+		//enrichS3Logs(cfg.S3.MetadataTarget, logs, event)
+		return next.ConsumeLogs(newContext, logs)
 	}
 
 	cwDecoder := internal.NewDefaultCWLogsDecoder()

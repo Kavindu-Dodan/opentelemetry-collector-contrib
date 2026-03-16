@@ -53,7 +53,10 @@ func (a *logAttributesProcessor) processLogs(ctx context.Context, ld plog.Logs) 
 					}
 				}
 
-				a.attrProc.Process(ctx, a.logger, lr.Attributes())
+				// override map ?
+				m := lr.Body().Map()
+
+				a.attrProc.Process(ctx, a.logger, m)
 			}
 		}
 	}
