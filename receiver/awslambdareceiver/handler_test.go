@@ -18,6 +18,7 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/collector/client"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/consumer/consumererror"
@@ -402,16 +403,8 @@ func TestHandleCloudwatchLogEvent(t *testing.T) {
 	}
 }
 
-func TestEnrichS3Logs(t *testing.T) {
+func TestEnrichments(t *testing.T) {
 	t.Parallel()
-
-	// given
-	logs := plog.NewLogs()
-
-	rl := logs.ResourceLogs().AppendEmpty()
-	sl := rl.ScopeLogs()
-	lr := sl.AppendEmpty().LogRecords()
-	lr.AppendEmpty()
 
 	observedTimestamp := time.UnixMilli(1765574662915)
 	expectedTimestamp := pcommon.NewTimestampFromTime(observedTimestamp)
@@ -430,35 +423,55 @@ func TestEnrichS3Logs(t *testing.T) {
 		},
 	}
 
+	// given
+	logs := plog.NewLogs()
+
+	rl := logs.ResourceLogs().AppendEmpty()
+	sl := rl.ScopeLogs()
+	lr := sl.AppendEmpty().LogRecords()
+	lr.AppendEmpty()
+
 	// when
 	enrichS3Logs(logs, s3Record)
+	enrichedCtx := getEnrichedContext(t.Context(), s3Record)
 
-	// then
-	for _, resource := range logs.ResourceLogs().All() {
-		resourceAttrs := resource.Resource().Attributes()
+	t.Run("Validate log enrichment", func(t *testing.T) {
+		for _, resource := range logs.ResourceLogs().All() {
+			resourceAttrs := resource.Resource().Attributes()
 
-		v, b := resourceAttrs.Get("cloud.provider")
-		require.True(t, b)
-		require.Equal(t, "aws", v.AsString())
+			v, b := resourceAttrs.Get("cloud.provider")
+			require.True(t, b)
+			require.Equal(t, "aws", v.AsString())
 
-		v, b = resourceAttrs.Get("cloud.region")
-		require.True(t, b)
-		require.Equal(t, "us-east-1", v.AsString())
+			v, b = resourceAttrs.Get("cloud.region")
+			require.True(t, b)
+			require.Equal(t, "us-east-1", v.AsString())
 
-		v, b = resourceAttrs.Get("aws.s3.bucket")
-		require.True(t, b)
-		require.Equal(t, "bucket-name", v.AsString())
+			v, b = resourceAttrs.Get("aws.s3.bucket")
+			require.True(t, b)
+			require.Equal(t, "bucket-name", v.AsString())
 
-		v, b = resourceAttrs.Get("aws.s3.key")
-		require.True(t, b)
-		require.Equal(t, "object-key", v.AsString())
+			v, b = resourceAttrs.Get("aws.s3.key")
+			require.True(t, b)
+			require.Equal(t, "object-key", v.AsString())
 
-		for _, scope := range resource.ScopeLogs().All() {
-			for _, logRecord := range scope.LogRecords().All() {
-				require.Equal(t, expectedTimestamp, logRecord.ObservedTimestamp())
+			for _, scope := range resource.ScopeLogs().All() {
+				for _, logRecord := range scope.LogRecords().All() {
+					require.Equal(t, expectedTimestamp, logRecord.ObservedTimestamp())
+				}
 			}
 		}
-	}
+	})
+
+	t.Run("Validate context enrichment", func(t *testing.T) {
+		info := client.FromContext(enrichedCtx)
+		metadata := info.Metadata
+
+		require.Equal(t, "aws", metadata.Get("cloud.provider")[0])
+		require.Equal(t, "us-east-1", metadata.Get("cloud.region")[0])
+		require.Equal(t, "bucket-name", metadata.Get("aws.s3.bucket")[0])
+		require.Equal(t, "object-key", metadata.Get("aws.s3.key")[0])
+	})
 }
 
 func TestConsumerErrorHandling(t *testing.T) {
