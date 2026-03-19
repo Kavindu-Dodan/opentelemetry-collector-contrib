@@ -251,7 +251,7 @@ func newLogsHandler(
 	// Wrapper function that sets observed timestamp for S3 logs
 	logsConsumer := func(ctx context.Context, event events.S3EventRecord, logs plog.Logs) error {
 		enrichS3Logs(logs, event)
-		return next.ConsumeLogs(ctx, logs)
+		return next.ConsumeLogs(getEnrichedContext(ctx, event), logs)
 	}
 
 	cwDecoder := internal.NewDefaultCWLogsDecoder()

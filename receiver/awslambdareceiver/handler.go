@@ -17,6 +17,7 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 	gojson "github.com/goccy/go-json"
+	"go.opentelemetry.io/collector/client"
 	"go.opentelemetry.io/collector/consumer/consumererror"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
@@ -115,7 +116,7 @@ func newS3LogsHandler(
 			}
 
 			enrichS3Logs(logs, event)
-			if err = consumer(ctx, event, logs); err != nil {
+			if err = consumer(getEnrichedContext(ctx, event), event, logs); err != nil {
 				return checkConsumerErrorAndWrap(err)
 			}
 		}
@@ -155,7 +156,7 @@ func newS3MetricsHandler(
 				return fmt.Errorf("failed to decode S3 metrics: %w", err)
 			}
 
-			if err := consumer(ctx, event, metrics); err != nil {
+			if err := consumer(getEnrichedContext(ctx, event), event, metrics); err != nil {
 				return checkConsumerErrorAndWrap(err)
 			}
 		}
@@ -313,6 +314,7 @@ func gunzipIfNeeded(r io.Reader) (io.Reader, error) {
 func enrichS3Logs(logs plog.Logs, event events.S3EventRecord) {
 	for _, resourceLogs := range logs.ResourceLogs().All() {
 		resourceAttrs := resourceLogs.Resource().Attributes()
+
 		resourceAttrs.PutStr(string(conventions.CloudProviderKey), conventions.CloudProviderAWS.Value.AsString())
 		resourceAttrs.PutStr(string(conventions.CloudRegionKey), event.AWSRegion)
 		resourceAttrs.PutStr(string(conventions.AWSS3BucketKey), event.S3.Bucket.Name)
@@ -324,6 +326,18 @@ func enrichS3Logs(logs plog.Logs, event events.S3EventRecord) {
 			}
 		}
 	}
+}
+
+func getEnrichedContext(ctx context.Context, event events.S3EventRecord) context.Context {
+	metadata := map[string][]string{}
+	metadata[string(conventions.CloudProviderKey)] = []string{conventions.CloudProviderAWS.Value.AsString()}
+	metadata[string(conventions.CloudRegionKey)] = []string{event.AWSRegion}
+	metadata[string(conventions.AWSS3BucketKey)] = []string{event.S3.Bucket.Name}
+	metadata[string(conventions.AWSS3KeyKey)] = []string{event.S3.Object.Key}
+
+	info := client.Info{}
+	info.Metadata = client.NewMetadata(metadata)
+	return client.NewContext(ctx, info)
 }
 
 // checkConsumerErrorAndWrap is a helper to process errors returned from consumer functions.
