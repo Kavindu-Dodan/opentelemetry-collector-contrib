@@ -101,7 +101,8 @@ func TestCreateLogs(t *testing.T) {
 	// Check that S3 metadata is present in the context
 	require.Contains(t, m.Get("cloud.provider"), "aws")
 	require.Contains(t, m.Get("cloud.region"), "us-east-1")
-	require.Contains(t, m.Get("aws.s3.bucket"), "test-bucket")
+	require.Contains(t, m.Get("aws.s3.bucket.name"), "test-bucket")
+	require.Contains(t, m.Get("aws.s3.bucket.arn"), "arn:aws:s3:::test-bucket")
 	require.Contains(t, m.Get("aws.s3.key"), "test-file.txt")
 }
 
@@ -173,7 +174,8 @@ func TestCreateMetrics(t *testing.T) {
 	// Check that S3 metadata is present in the context
 	require.Contains(t, m.Get("cloud.provider"), "aws")
 	require.Contains(t, m.Get("cloud.region"), "us-east-1")
-	require.Contains(t, m.Get("aws.s3.bucket"), "test-bucket")
+	require.Contains(t, m.Get("aws.s3.bucket.name"), "test-bucket")
+	require.Contains(t, m.Get("aws.s3.bucket.arn"), "arn:aws:s3:::test-bucket")
 	require.Contains(t, m.Get("aws.s3.key"), "test-file.txt")
 }
 

@@ -404,6 +404,7 @@ func TestEnrichments(t *testing.T) {
 			SchemaVersion: "",
 			Bucket: events.S3Bucket{
 				Name: "bucket-name",
+				Arn:  "arn:aws:s3:::bucket-name",
 			},
 			Object: events.S3Object{
 				Key: "object-key",
@@ -435,9 +436,13 @@ func TestEnrichments(t *testing.T) {
 			require.True(t, b)
 			require.Equal(t, "us-east-1", v.AsString())
 
-			v, b = resourceAttrs.Get("aws.s3.bucket")
+			v, b = resourceAttrs.Get("aws.s3.bucket.name")
 			require.True(t, b)
 			require.Equal(t, "bucket-name", v.AsString())
+
+			v, b = resourceAttrs.Get("aws.s3.bucket.arn")
+			require.True(t, b)
+			require.Equal(t, "arn:aws:s3:::bucket-name", v.AsString())
 
 			v, b = resourceAttrs.Get("aws.s3.key")
 			require.True(t, b)
@@ -457,7 +462,8 @@ func TestEnrichments(t *testing.T) {
 
 		require.Equal(t, "aws", metadata.Get("cloud.provider")[0])
 		require.Equal(t, "us-east-1", metadata.Get("cloud.region")[0])
-		require.Equal(t, "bucket-name", metadata.Get("aws.s3.bucket")[0])
+		require.Equal(t, "bucket-name", metadata.Get("aws.s3.bucket.name")[0])
+		require.Equal(t, "arn:aws:s3:::bucket-name", metadata.Get("aws.s3.bucket.arn")[0])
 		require.Equal(t, "object-key", metadata.Get("aws.s3.key")[0])
 	})
 }

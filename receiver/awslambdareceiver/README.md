@@ -62,12 +62,13 @@ S3 events are handled in the following manner:
 Following metadata is available through Client Info metadata for both logs and metrics.
 This is available through Context to be used by any downstream component (for example, processors):
 
-| Metadata Key   | Description          |
-|----------------|----------------------|
-| cloud.provider | Value is `aws`       |
-| cloud.region   | The S3 bucket region |
-| aws.s3.bucket  | The S3 bucket name   |
-| aws.s3.key     | The S3 object key    |
+| Metadata Key       | Description          |
+|--------------------|----------------------|
+| cloud.provider     | Value is `aws`       |
+| cloud.region       | The S3 bucket region |
+| aws.s3.bucket.name | The S3 bucket name   |
+| aws.s3.bucket.arn  | The S3 bucket ARN    |
+| aws.s3.key         | The S3 object key    |
 
 ### CloudWatch Logs subscription
 
