@@ -18,6 +18,7 @@ import (
 	"github.com/aws/aws-lambda-go/events"
 	gojson "github.com/goccy/go-json"
 	"go.opentelemetry.io/collector/client"
+	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/consumer/consumererror"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
@@ -35,13 +36,8 @@ const s3StreamBatchSize = 10_000_000 // 10MB chunks
 // readerBufferSize defines the buffer size for buffered readers.
 const readerBufferSize = 128 * 1024 // 128KB buffer size
 
-type emits interface {
-	plog.Logs | pmetric.Metrics
-}
-
 type (
-	s3EventConsumerFunc[T emits] func(context.Context, events.S3EventRecord, T) error
-	handlerRegistry              map[eventType]lambdaEventHandler
+	handlerRegistry map[eventType]lambdaEventHandler
 )
 
 type handlerProvider interface {
@@ -94,7 +90,7 @@ func newS3LogsHandler(
 	service internal.S3Service,
 	baseLogger *zap.Logger,
 	logsDecoder encoding.LogsDecoderFactory,
-	consumer s3EventConsumerFunc[plog.Logs],
+	consumer consumer.Logs,
 ) *s3Handler {
 	logDecodeF := func(ctx context.Context, reader io.Reader, event events.S3EventRecord) error {
 		var decoder encoding.LogsDecoder
@@ -116,7 +112,7 @@ func newS3LogsHandler(
 			}
 
 			enrichS3Logs(logs, event)
-			if err = consumer(getEnrichedContext(ctx, event), event, logs); err != nil {
+			if err = consumer.ConsumeLogs(getEnrichedContext(ctx, event), logs); err != nil {
 				return checkConsumerErrorAndWrap(err)
 			}
 		}
@@ -135,7 +131,7 @@ func newS3MetricsHandler(
 	service internal.S3Service,
 	baseLogger *zap.Logger,
 	metricsDecoder encoding.MetricsDecoderFactory,
-	consumer s3EventConsumerFunc[pmetric.Metrics],
+	consumer consumer.Metrics,
 ) *s3Handler {
 	metricDecodeF := func(ctx context.Context, reader io.Reader, event events.S3EventRecord) error {
 		var decoder encoding.MetricsDecoder
@@ -156,7 +152,7 @@ func newS3MetricsHandler(
 				return fmt.Errorf("failed to decode S3 metrics: %w", err)
 			}
 
-			if err := consumer(getEnrichedContext(ctx, event), event, metrics); err != nil {
+			if err := consumer.ConsumeMetrics(getEnrichedContext(ctx, event), metrics); err != nil {
 				return checkConsumerErrorAndWrap(err)
 			}
 		}
@@ -234,12 +230,12 @@ func (*s3Handler) parseEvent(raw json.RawMessage) (event events.S3EventRecord, e
 // cwLogsSubscriptionHandler is specialized in CloudWatch log stream subscription filter events
 type cwLogsSubscriptionHandler struct {
 	logsDecoder encoding.LogsDecoderFactory
-	consumer    func(context.Context, plog.Logs) error
+	consumer    consumer.Logs
 }
 
 func newCWLogsSubscriptionHandler(
 	logsDecoder encoding.LogsDecoderFactory,
-	consumer func(context.Context, plog.Logs) error,
+	consumer consumer.Logs,
 ) *cwLogsSubscriptionHandler {
 	return &cwLogsSubscriptionHandler{
 		logsDecoder: logsDecoder,
@@ -285,7 +281,7 @@ func (c *cwLogsSubscriptionHandler) handle(ctx context.Context, event json.RawMe
 
 			return fmt.Errorf("failed to decode S3 logs: %w", err)
 		}
-		if err = c.consumer(ctx, logs); err != nil {
+		if err = c.consumer.ConsumeLogs(ctx, logs); err != nil {
 			return checkConsumerErrorAndWrap(err)
 		}
 	}
@@ -328,6 +324,8 @@ func enrichS3Logs(logs plog.Logs, event events.S3EventRecord) {
 	}
 }
 
+// getEnrichedContext creates a new context with metadata extracted from the S3 event,
+// which can be used for further processing and correlation in the pipeline.
 func getEnrichedContext(ctx context.Context, event events.S3EventRecord) context.Context {
 	metadata := map[string][]string{}
 	metadata[string(conventions.CloudProviderKey)] = []string{conventions.CloudProviderAWS.Value.AsString()}
