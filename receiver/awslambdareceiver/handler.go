@@ -313,7 +313,8 @@ func enrichS3Logs(logs plog.Logs, event events.S3EventRecord) {
 
 		resourceAttrs.PutStr(string(conventions.CloudProviderKey), conventions.CloudProviderAWS.Value.AsString())
 		resourceAttrs.PutStr(string(conventions.CloudRegionKey), event.AWSRegion)
-		resourceAttrs.PutStr(string(conventions.AWSS3BucketKey), event.S3.Bucket.Name)
+		resourceAttrs.PutStr("aws.s3.bucket.name", event.S3.Bucket.Name)
+		resourceAttrs.PutStr("aws.s3.bucket.arn", event.S3.Bucket.Arn)
 		resourceAttrs.PutStr(string(conventions.AWSS3KeyKey), event.S3.Object.Key)
 
 		for _, scopeLogs := range resourceLogs.ScopeLogs().All() {
@@ -330,7 +331,8 @@ func getEnrichedContext(ctx context.Context, event events.S3EventRecord) context
 	metadata := map[string][]string{}
 	metadata[string(conventions.CloudProviderKey)] = []string{conventions.CloudProviderAWS.Value.AsString()}
 	metadata[string(conventions.CloudRegionKey)] = []string{event.AWSRegion}
-	metadata[string(conventions.AWSS3BucketKey)] = []string{event.S3.Bucket.Name}
+	metadata["aws.s3.bucket.name"] = []string{event.S3.Bucket.Name}
+	metadata["aws.s3.bucket.arn"] = []string{event.S3.Bucket.Arn}
 	metadata[string(conventions.AWSS3KeyKey)] = []string{event.S3.Object.Key}
 
 	info := client.Info{}
