@@ -225,13 +225,7 @@ func TestProcessLambdaEvent_S3LogNotification(t *testing.T) {
 				Return(io.NopCloser(bytes.NewReader(test.s3MockContent.data)), nil).
 				AnyTimes()
 
-			// Wrap the consumer to match the new s3EventConsumerFunc signature
-			logsConsumer := func(ctx context.Context, event events.S3EventRecord, logs plog.Logs) error {
-				enrichS3Logs(logs, event)
-				return test.eventConsumer.ConsumeLogs(ctx, logs)
-			}
-
-			handler := newS3LogsHandler(s3Service, zap.NewNop(), test.extension, logsConsumer)
+			handler := newS3LogsHandler(s3Service, zap.NewNop(), test.extension, test.eventConsumer)
 
 			var event json.RawMessage
 			event, err := json.Marshal(test.s3Event)
@@ -317,13 +311,7 @@ func TestS3HandlerParseEvent(t *testing.T) {
 	s3Service := internal.NewMockS3Service(ctr)
 	s3Service.EXPECT().ReadObject(gomock.Any(), gomock.Any(), gomock.Any()).Return([]byte("S3 content"), nil).AnyTimes()
 
-	var consumer noOpLogsConsumer
-	// Wrap the consumer to match the new s3EventConsumerFunc signature
-	logsConsumer := func(ctx context.Context, event events.S3EventRecord, logs plog.Logs) error {
-		enrichS3Logs(logs, event)
-		return consumer.ConsumeLogs(ctx, logs)
-	}
-	handler := newS3LogsHandler(s3Service, zap.NewNop(), &customLogUnmarshaler{}, logsConsumer)
+	handler := newS3LogsHandler(s3Service, zap.NewNop(), &customLogUnmarshaler{}, &noOpLogsConsumer{})
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -391,7 +379,7 @@ func TestHandleCloudwatchLogEvent(t *testing.T) {
 			lambdaEvent, err := json.Marshal(cwEvent)
 			require.NoError(t, err)
 
-			handler := newCWLogsSubscriptionHandler(test.extension, test.eventConsumer.ConsumeLogs)
+			handler := newCWLogsSubscriptionHandler(test.extension, test.eventConsumer)
 
 			err = handler.handle(t.Context(), lambdaEvent)
 			if test.expectedErr != "" {
@@ -523,12 +511,7 @@ func TestConsumerErrorHandling(t *testing.T) {
 				Return(io.NopCloser(bytes.NewReader([]byte("object content"))), nil).
 				Times(1)
 
-			// Consumer that returns the test error
-			logsConsumer := func(_ context.Context, _ events.S3EventRecord, _ plog.Logs) error {
-				return test.consumerErr
-			}
-
-			handler := newS3LogsHandler(s3Service, zap.NewNop(), &customLogUnmarshaler{}, logsConsumer)
+			handler := newS3LogsHandler(s3Service, zap.NewNop(), &customLogUnmarshaler{}, &noOpLogsConsumer{err: test.consumerErr})
 
 			event, err := json.Marshal(mockEvent)
 			require.NoError(t, err)
