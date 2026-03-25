@@ -99,7 +99,6 @@ func TestCreateLogs(t *testing.T) {
 	m := client.FromContext(contexts[0]).Metadata
 
 	// Check that S3 metadata is present in the context
-	require.Contains(t, m.Get("cloud.provider"), "aws")
 	require.Contains(t, m.Get("cloud.region"), "us-east-1")
 	require.Contains(t, m.Get("aws.s3.bucket.name"), "test-bucket")
 	require.Contains(t, m.Get("aws.s3.bucket.arn"), "arn:aws:s3:::test-bucket")
@@ -172,7 +171,6 @@ func TestCreateMetrics(t *testing.T) {
 	m := client.FromContext(contexts[0]).Metadata
 
 	// Check that S3 metadata is present in the context
-	require.Contains(t, m.Get("cloud.provider"), "aws")
 	require.Contains(t, m.Get("cloud.region"), "us-east-1")
 	require.Contains(t, m.Get("aws.s3.bucket.name"), "test-bucket")
 	require.Contains(t, m.Get("aws.s3.bucket.arn"), "arn:aws:s3:::test-bucket")

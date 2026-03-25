@@ -329,7 +329,6 @@ func enrichS3Logs(logs plog.Logs, event events.S3EventRecord) {
 // which can be used for further processing and correlation in the pipeline.
 func getEnrichedContext(ctx context.Context, event events.S3EventRecord) context.Context {
 	metadata := map[string][]string{}
-	metadata[string(conventions.CloudProviderKey)] = []string{conventions.CloudProviderAWS.Value.AsString()}
 	metadata[string(conventions.CloudRegionKey)] = []string{event.AWSRegion}
 	metadata["aws.s3.bucket.name"] = []string{event.S3.Bucket.Name}
 	metadata["aws.s3.bucket.arn"] = []string{event.S3.Bucket.Arn}

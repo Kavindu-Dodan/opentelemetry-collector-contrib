@@ -460,7 +460,6 @@ func TestEnrichments(t *testing.T) {
 		info := client.FromContext(enrichedCtx)
 		metadata := info.Metadata
 
-		require.Equal(t, "aws", metadata.Get("cloud.provider")[0])
 		require.Equal(t, "us-east-1", metadata.Get("cloud.region")[0])
 		require.Equal(t, "bucket-name", metadata.Get("aws.s3.bucket.name")[0])
 		require.Equal(t, "arn:aws:s3:::bucket-name", metadata.Get("aws.s3.bucket.arn")[0])
